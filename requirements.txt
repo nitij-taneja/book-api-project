@@ -1,0 +1,61 @@
+# Django Framework
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+
+# Database
+psycopg2-binary==2.9.7  # For PostgreSQL (optional)
+
+# HTTP Requests
+requests==2.31.0
+
+# HTML Parsing
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# AI/LLM Integration
+groq==0.4.1
+
+# PDF Processing
+PyPDF2==3.0.1
+pikepdf==8.7.1
+reportlab==4.0.4
+
+# File Format Conversion
+ebooklib==0.18  # For EPUB handling
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# JSON Processing (built-in with Python 3.7+)
+# json - built-in
+
+# URL Parsing (built-in)
+# urllib - built-in
+
+# Regular Expressions (built-in)
+# re - built-in
+
+# Date/Time (built-in)
+# datetime - built-in
+
+# UUID Generation (built-in)
+# uuid - built-in
+
+# Operating System Interface (built-in)
+# os - built-in
+
+# System-specific parameters (built-in)
+# sys - built-in
+
+# Time-related functions (built-in)
+# time - built-in
+
+# Type Hints (built-in with Python 3.5+)
+# typing - built-in
+
+# Development Dependencies (optional)
+pytest==7.4.3
+pytest-django==4.7.0
+black==23.11.0
+flake8==6.1.0
