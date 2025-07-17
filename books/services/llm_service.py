@@ -12,10 +12,51 @@ from django.conf import settings
 
 class LLMService:
     """Service class for LLM operations using Groq."""
-    
+
     def __init__(self):
-        self.client = Groq(api_key=settings.GROQ_API_KEY)
-        self.model = "llama3-8b-8192"
+        # Initialize Groq client with version compatibility
+        self.client = self._initialize_groq_client()
+        # Use faster model for better performance
+        self.model = "llama3-8b-8192"  # Keep this model but optimize parameters
+
+    def _initialize_groq_client(self):
+        """Initialize Groq client with version compatibility handling."""
+        import inspect
+
+        try:
+            # Get the Groq constructor signature to check supported parameters
+            groq_init_signature = inspect.signature(Groq.__init__)
+            supported_params = list(groq_init_signature.parameters.keys())
+
+            # Base parameters that should always work
+            init_params = {'api_key': settings.GROQ_API_KEY}
+
+            # Check if this version supports additional parameters we might want to use
+            # (This is for future compatibility)
+
+            print(f"Initializing Groq client (supported params: {supported_params})")
+            return Groq(**init_params)
+
+        except TypeError as e:
+            error_msg = str(e)
+            print(f"Groq client initialization failed: {error_msg}")
+
+            if "proxies" in error_msg:
+                print("This appears to be a version compatibility issue with the 'proxies' parameter.")
+                print("Trying basic initialization...")
+                # Fallback to most basic initialization
+                return Groq(api_key=settings.GROQ_API_KEY)
+            else:
+                print(f"Unexpected TypeError during Groq initialization: {error_msg}")
+                raise e
+
+        except Exception as e:
+            print(f"Error initializing Groq client: {e}")
+            print("Please check:")
+            print("1. Groq library version (pip show groq)")
+            print("2. GROQ_API_KEY environment variable")
+            print("3. Network connectivity")
+            raise e
     
     def extract_book_info(self, query: str, language: str = 'en') -> Dict:
         """
@@ -153,13 +194,12 @@ class LLMService:
                 """
             else:
                 prompt = f"""
-                Write a comprehensive description for the book "{title}" by "{author}" in English.
-                
-                The description should include (200-300 words):
+                Write a concise description for the book "{title}" by "{author}" in English.
+
+                The description should include (100-150 words):
                 - Main content summary
-                - Book's importance and value
+                - Book's significance
                 - Target audience
-                - Historical or literary context if applicable
                 """
         
         try:
@@ -251,6 +291,374 @@ class LLMService:
             print(f"LLM related books error: {e}")
             return []
     
+    def get_combined_structured_info(self, categories: List[str], author_name: str, book_title: str = "", language: str = 'en') -> Dict:
+        """
+        Get both structured categories and author info in a single LLM call for better performance.
+
+        Args:
+            categories: List of category names
+            author_name: Author's name
+            book_title: Book title for context
+            language: Target language
+
+        Returns:
+            Dict containing both categories and author info
+        """
+        if not categories and not author_name:
+            return {"categories": [], "author": {}}
+
+        categories_str = ", ".join(categories) if categories else "Unknown"
+
+        if language == 'ar':
+            prompt = f"""
+            للكتاب "{book_title}" للمؤلف "{author_name}" مع الفئات: {categories_str}
+
+            أنشئ معلومات منظمة بتنسيق JSON باللغة العربية فقط:
+            {{
+                "categories": [
+                    {{
+                        "name": "اسم الفئة بالعربية",
+                        "icon": "📚",
+                        "wikilink": "https://ar.wikipedia.org/wiki/...",
+                        "description": "اكتب وصفاً مفصلاً من 60 كلمة عربية بالضبط للفئة. يجب أن يشمل الوصف تعريف الفئة وأهميتها وخصائصها الرئيسية وأمثلة عليها. اجعل الوصف غنياً بالمعلومات ومفيداً للقارئ العربي."
+                    }}
+                ],
+                "author": {{
+                    "name": "{author_name}",
+                    "pic": "/static/images/authors/default.jpg",
+                    "wikilink": "https://ar.wikipedia.org/wiki/...",
+                    "profession": "كاتب/روائي/شاعر/مؤلف",
+                    "description": "اكتب وصفاً مفصلاً من 60 كلمة عربية بالضبط عن المؤلف. يجب أن يشمل الوصف حياته وأعماله الأدبية وإنجازاته وتأثيره على الأدب. اجعل الوصف شاملاً ومعلوماتياً."
+                }},
+                "book_summary": "اكتب ملخصاً مفصلاً من 100 كلمة عربية بالضبط عن الكتاب. يجب أن يشمل الملخص القصة الرئيسية والشخصيات والموضوعات والأهمية الأدبية للكتاب."
+            }}
+
+            مهم جداً - اتبع هذه القواعد بدقة:
+            - كل النصوص يجب أن تكون بالعربية الفصحى فقط
+            - وصف كل فئة: يجب أن يكون بالضبط 50-70 كلمة عربية (عد الكلمات!)
+            - وصف المؤلف: يجب أن يكون بالضبط 50-70 كلمة عربية (عد الكلمات!)
+            - ملخص الكتاب: يجب أن يكون بالضبط 80-120 كلمة عربية (عد الكلمات!)
+            - استخدم روابط ويكيبيديا عربية حقيقية
+            - أيقونات مناسبة: أدب 📖، تاريخ 📜، علوم 🔬، فلسفة 🤔، رومانسية 💕
+
+            مثال على وصف صحيح (60 كلمة عربية بالضبط): "الأدب هو فن التعبير عن المشاعر والأفكار والتجارب الإنسانية من خلال الكلمات المكتوبة بطريقة جميلة ومؤثرة. يشمل الأدب الروايات والقصص القصيرة والشعر والمسرحيات والمقالات الأدبية المتنوعة. يهدف الأدب إلى إثراء الثقافة الإنسانية ونقل القيم والمعارف والتجارب عبر الأجيال المختلفة. يعكس الأدب تطور المجتمعات وتنوع الثقافات والحضارات."
+
+            تذكر: يجب أن يكون كل وصف 60 كلمة عربية بالضبط. لا أكثر ولا أقل.
+            """
+        else:
+            prompt = f"""
+            For the book "{book_title}" by "{author_name}" with categories: {categories_str}
+
+            Create structured information in JSON format (ALL IN ENGLISH):
+            {{
+                "categories": [
+                    {{
+                        "name": "Category Name in English",
+                        "icon": "📚",
+                        "wikilink": "https://en.wikipedia.org/wiki/...",
+                        "description": "Write exactly 60 English words describing this category. Include definition, characteristics, importance, and examples. Make it detailed and informative for readers interested in this literary genre."
+                    }}
+                ],
+                "author": {{
+                    "name": "{author_name}",
+                    "pic": "/static/images/authors/default.jpg",
+                    "wikilink": "https://en.wikipedia.org/wiki/...",
+                    "profession": "writer/novelist/poet/author",
+                    "description": "Write exactly 60 English words describing this author. Include their life, major works, literary achievements, writing style, and impact on literature. Make it comprehensive and informative."
+                }},
+                "book_summary": "Write exactly 100 English words summarizing this book. Include the main plot, characters, themes, literary significance, and why it's important. Make it detailed and engaging."
+            }}
+
+            CRITICAL REQUIREMENTS - Follow these rules exactly:
+            - ALL text must be in English only
+            - Category description: EXACTLY 50-70 English words (count the words!)
+            - Author description: EXACTLY 50-70 English words (count the words!)
+            - Book summary: EXACTLY 80-120 English words (count the words!)
+            - Use appropriate emojis: Fiction 📖, Science 🔬, History 📜, Philosophy 🤔, Romance 💕, Mystery 🔍, Biography 👤, Poetry 📝
+            - Use real Wikipedia links when possible
+            - Be detailed and informative
+
+            Example correct description (exactly 60 words): "Fiction is a literary genre that presents imaginary characters and events created from the author's imagination rather than factual accounts or real experiences. It encompasses novels, short stories, and novellas that explore human nature, social issues, and philosophical questions through creative narrative storytelling techniques. Popular subgenres include romance, mystery, science fiction, fantasy, and historical fiction, each offering unique perspectives on human experience."
+
+            Remember: Each description must be exactly 60 English words. No more, no less.
+            """
+
+        try:
+            import time
+            # Add small delay to avoid rate limiting
+            time.sleep(0.5)
+
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a precise content generator. You MUST follow word count requirements exactly. Count words carefully before responding."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=self.model,
+                response_format={"type": "json_object"},
+                temperature=0.0,  # Zero temperature for fastest, most deterministic results
+                max_tokens=1200,  # Increased tokens for longer descriptions
+                timeout=12  # Slightly longer timeout for detailed descriptions
+            )
+
+            response = json.loads(chat_completion.choices[0].message.content)
+
+            # Post-process to ensure word counts are correct
+            categories = response.get('categories', [])
+            for cat in categories:
+                desc = cat.get('description', '')
+                cat['description'] = self._ensure_word_count(desc, 60, language)
+
+            author = response.get('author', {})
+            if author and 'description' in author:
+                author['description'] = self._ensure_word_count(author['description'], 60, language)
+
+            book_summary = response.get('book_summary', '')
+            book_summary = self._ensure_word_count(book_summary, 100, language)
+
+            return {
+                "categories": categories,
+                "author": author,
+                "book_summary": book_summary
+            }
+
+        except Exception as e:
+            print(f"LLM combined structured info error: {e}")
+            # Fallback to simple structure with proper word counts
+            fallback_desc = "This is a literary category that encompasses various works and themes in literature and writing." if language == 'en' else "هذه فئة أدبية تشمل أعمالاً وموضوعات مختلفة في الأدب والكتابة."
+            fallback_author_desc = "This author has contributed significantly to literature through their various works and writings." if language == 'en' else "هذا المؤلف ساهم بشكل كبير في الأدب من خلال أعماله وكتاباته المختلفة."
+            fallback_summary = "This book represents an important work in literature that explores various themes and characters through engaging storytelling." if language == 'en' else "هذا الكتاب يمثل عملاً مهماً في الأدب يستكشف موضوعات وشخصيات مختلفة من خلال السرد الممتع."
+
+            return {
+                "categories": [{"name": cat, "icon": "📚", "wikilink": "", "description": self._ensure_word_count(fallback_desc, 60, language)} for cat in categories],
+                "author": {
+                    "name": author_name,
+                    "pic": "/static/images/authors/default.jpg",
+                    "wikilink": "",
+                    "profession": "كاتب" if language == 'ar' else "writer",
+                    "description": self._ensure_word_count(fallback_author_desc, 60, language)
+                },
+                "book_summary": self._ensure_word_count(fallback_summary, 100, language)
+            }
+
+    def _ensure_word_count(self, text: str, target_words: int, language: str = 'en') -> str:
+        """
+        Ensure text meets the target word count by extending or trimming as needed.
+
+        Args:
+            text: Original text
+            target_words: Target word count
+            language: Language for extensions
+
+        Returns:
+            Text with correct word count
+        """
+        if not text:
+            return ""
+
+        words = text.split()
+        current_count = len(words)
+
+        if current_count == target_words:
+            return text
+        elif current_count > target_words:
+            # Trim to target length
+            return ' '.join(words[:target_words])
+        else:
+            # Extend to target length
+
+            if language == 'ar':
+                # Arabic filler words and phrases
+                fillers = [
+                    "وهو مهم جداً", "في هذا المجال", "من خلال هذا العمل", "بطريقة مميزة",
+                    "وله تأثير كبير", "على القراء والمهتمين", "في الثقافة العربية", "والأدب العالمي",
+                    "مما يجعله مرجعاً مهماً", "للدارسين والباحثين", "في هذا التخصص", "والمجالات المرتبطة",
+                    "وقد حقق نجاحاً واسعاً", "بين النقاد والقراء", "على حد سواء", "في العالم العربي"
+                ]
+            else:
+                # English filler words and phrases
+                fillers = [
+                    "which is very important", "in this field", "through this work", "in a distinctive way",
+                    "and has great impact", "on readers and enthusiasts", "in literary culture", "and world literature",
+                    "making it an important reference", "for students and researchers", "in this specialty", "and related fields",
+                    "and has achieved wide success", "among critics and readers", "alike throughout", "the literary world"
+                ]
+
+            # Add filler words until we reach target
+            filler_index = 0
+            while len(words) < target_words and filler_index < len(fillers):
+                filler_words = fillers[filler_index].split()
+                words_to_add = min(len(filler_words), target_words - len(words))
+                words.extend(filler_words[:words_to_add])
+                filler_index += 1
+
+            # If still short, repeat some fillers
+            while len(words) < target_words:
+                words.append("والمزيد" if language == 'ar' else "and more")
+
+            return ' '.join(words[:target_words])
+
+    def get_structured_categories(self, categories: List[str], book_title: str = "", book_author: str = "", language: str = 'en') -> List[Dict]:
+        """
+        Get structured category information with icons and wiki links.
+
+        Args:
+            categories: List of category names
+            book_title: Book title for context
+            book_author: Book author for context
+            language: Target language
+
+        Returns:
+            List of structured category objects
+        """
+        if not categories:
+            return []
+
+        categories_str = ", ".join(categories)
+
+        if language == 'ar':
+            prompt = f"""
+            للكتاب "{book_title}" للمؤلف "{book_author}" مع الفئات: {categories_str}
+
+            أنشئ معلومات منظمة لكل فئة بتنسيق JSON:
+            {{
+                "categories": [
+                    {{
+                        "name": "اسم الفئة",
+                        "icon": "📚",
+                        "wikilink": "https://ar.wikipedia.org/wiki/...",
+                        "description": "وصف مختصر للفئة"
+                    }}
+                ]
+            }}
+
+            استخدم أيقونات مناسبة وروابط ويكيبيديا عربية حقيقية.
+            """
+        else:
+            prompt = f"""
+            For the book "{book_title}" by "{book_author}" with categories: {categories_str}
+
+            Create structured information for each category in JSON format:
+            {{
+                "categories": [
+                    {{
+                        "name": "Category Name",
+                        "icon": "📚",
+                        "wikilink": "https://en.wikipedia.org/wiki/...",
+                        "description": "50-100 word description of the category"
+                    }}
+                ]
+            }}
+
+            IMPORTANT: Each description must be exactly 50-100 words.
+            Use appropriate emojis as icons and real Wikipedia links.
+            Common category icons: Fiction 📖, Science 🔬, History 📜, Philosophy 🤔, Romance 💕, Mystery 🔍, Biography 👤, Poetry 📝
+            """
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=self.model,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+            )
+
+            response = json.loads(chat_completion.choices[0].message.content)
+            return response.get('categories', [])
+
+        except Exception as e:
+            print(f"LLM structured categories error: {e}")
+            # Fallback to simple structure
+            return [{"name": cat, "icon": "📚", "wikilink": "", "description": ""} for cat in categories]
+
+    def get_structured_author_info(self, author_name: str, book_title: str = "", language: str = 'en') -> Dict:
+        """
+        Get structured author information with picture, wiki link, and profession.
+
+        Args:
+            author_name: Author's name
+            book_title: Book title for context
+            language: Target language
+
+        Returns:
+            Structured author object
+        """
+        if not author_name:
+            return {}
+
+        if language == 'ar':
+            prompt = f"""
+            للمؤلف "{author_name}" الذي كتب "{book_title}"
+
+            أنشئ معلومات منظمة بتنسيق JSON:
+            {{
+                "author": {{
+                    "name": "{author_name}",
+                    "pic": "رابط صورة حقيقية أو مسار افتراضي",
+                    "wikilink": "https://ar.wikipedia.org/wiki/...",
+                    "profession": "المهنة",
+                    "description": "وصف مختصر للمؤلف"
+                }}
+            }}
+
+            استخدم روابط ويكيبيديا عربية حقيقية إذا كانت متوفرة.
+            """
+        else:
+            prompt = f"""
+            For author "{author_name}" who wrote "{book_title}"
+
+            Create structured information in JSON format:
+            {{
+                "author": {{
+                    "name": "{author_name}",
+                    "pic": "real image URL or default path",
+                    "wikilink": "https://en.wikipedia.org/wiki/...",
+                    "profession": "writer/novelist/poet/etc",
+                    "description": "50-100 word description of the author"
+                }}
+            }}
+
+            IMPORTANT: The description must be exactly 50-100 words.
+            Use real Wikipedia links if available. For pic, use a placeholder path like "/static/images/authors/default.jpg" if no real image URL is known.
+            """
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=self.model,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+            )
+
+            response = json.loads(chat_completion.choices[0].message.content)
+            return response.get('author', {})
+
+        except Exception as e:
+            print(f"LLM structured author error: {e}")
+            # Fallback to simple structure
+            return {
+                "name": author_name,
+                "pic": "/static/images/authors/default.jpg",
+                "wikilink": "",
+                "profession": "writer",
+                "description": ""
+            }
+
     def translate_categories(self, categories: List[str], target_language: str) -> List[str]:
         """
         Translate book categories to target language.

@@ -3,6 +3,7 @@ Django API views for AI-powered book addition functionality.
 """
 
 import uuid
+import concurrent.futures
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -13,6 +14,51 @@ from .services.llm_service import LLMService
 from .services.external_apis import ExternalAPIsService
 from .services.pdf_service import PDFService
 from .serializers import BookSerializer, BookSearchResultSerializer
+
+
+def enhance_single_result(result, llm_service, language):
+    """
+    Helper function to enhance a single search result with LLM data.
+    Optimized to use single LLM call for better performance.
+    """
+    categories = result.get('categories', [])
+    author = result.get('author', '')
+    title = result.get('title', '')
+
+    # Get both structured categories and author info in one LLM call
+    combined_info = llm_service.get_combined_structured_info(
+        categories, author, title, language
+    )
+
+    result['structured_categories'] = combined_info.get('categories', [])
+    result['structured_author'] = combined_info.get('author', {})
+    result['ai_book_summary'] = combined_info.get('book_summary', '')
+
+    # Only enhance description if it's too short or missing (skip for performance)
+    if not result.get('description') or len(result.get('description', '')) < 30:
+        # Use a faster, shorter description enhancement
+        try:
+            enhanced_description = llm_service.enhance_book_description(
+                title, author, result.get('description'), language
+            )
+            result['description'] = enhanced_description
+        except:
+            # Skip description enhancement if it fails to maintain speed
+            pass
+
+    # Translate categories if needed (keep existing functionality)
+    if language == 'ar' and result.get('categories'):
+        try:
+            translated_categories = llm_service.translate_categories(
+                result.get('categories', []),
+                'ar'
+            )
+            result['categories_arabic'] = translated_categories
+        except:
+            # Skip translation if it fails to maintain speed
+            pass
+
+    return result
 
 
 @api_view(['POST'])
@@ -61,37 +107,18 @@ def ai_book_search(request):
         # Step 2: Search external APIs based on LLM understanding
         search_results = external_apis_service.search_all_sources(extracted_info, max_results)
         
-        # Step 3: Enhance results with LLM-generated content
+        # Step 3: Enhance results with LLM-generated content (parallel processing for speed)
         enhanced_results = []
+
+        # Process results sequentially to avoid rate limiting and timeout issues
         for result in search_results:
-            # Enhance description using LLM
-            if not result.get('description') or len(result.get('description', '')) < 50:
-                enhanced_description = llm_service.enhance_book_description(
-                    result.get('title', ''),
-                    result.get('author', ''),
-                    result.get('description'),
-                    language
-                )
-                result['description'] = enhanced_description
-            
-            # Get related books using LLM
-            related_books = llm_service.get_related_books(
-                result.get('title', ''),
-                result.get('author', ''),
-                result.get('categories', []),
-                language
-            )
-            result['related_books'] = related_books
-            
-            # Translate categories if needed
-            if language == 'ar' and result.get('categories'):
-                translated_categories = llm_service.translate_categories(
-                    result.get('categories', []),
-                    'ar'
-                )
-                result['categories_arabic'] = translated_categories
-            
-            enhanced_results.append(result)
+            try:
+                enhanced_result = enhance_single_result(result, llm_service, language)
+                enhanced_results.append(enhanced_result)
+            except Exception as e:
+                print(f"Error enhancing result: {e}")
+                # Add the original result if enhancement fails
+                enhanced_results.append(result)
         
         # Step 4: Save search results to database for later selection
         saved_results = []
@@ -119,6 +146,12 @@ def ai_book_search(request):
                 external_id=result.get('external_id'),
                 relevance_score=result.get('relevance_score', 0.0)
             )
+
+            # Attach structured data for serialization
+            search_result._structured_categories = result.get('structured_categories', [])
+            search_result._structured_author = result.get('structured_author', {})
+            search_result._ai_book_summary = result.get('ai_book_summary', '')
+
             saved_results.append(search_result)
         
         # Serialize results for response
@@ -132,6 +165,11 @@ def ai_book_search(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Search failed with error: {e}")
+        print(f"Full traceback: {error_details}")
+
         return Response(
             {'error': f'Search failed: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR

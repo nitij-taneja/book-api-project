@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 import json
 import re
-import re
+import concurrent.futures
 from .llm_service import LLMService
 
 
@@ -53,51 +53,51 @@ class ExternalAPIsService:
         search_variations = extracted_info.get('search_variations', [title])
         is_arabic_query = extracted_info.get('is_arabic_query', False)
         
-        # If it's an Arabic query, prioritize Arabic sources
+        # If it's an Arabic query, prioritize fastest Arabic sources
         if is_arabic_query:
-            # Search Arabic Collections Online first
-            for variation in search_variations:
-                aco_results = self.search_arabic_collections_online(variation)
-                all_results.extend(aco_results)
-                if len(all_results) >= max_results:
-                    break
-            
-            # Then search other sources
-            for variation in search_variations:
-                if len(all_results) < max_results:
-                    google_results = self.search_google_books(variation, prefer_arabic=True)
-                    all_results.extend(google_results)
-                
-                if len(all_results) < max_results:
-                    ia_results = self.search_internet_archive(variation, prefer_arabic=True)
-                    all_results.extend(ia_results)
-                
-                if len(all_results) < max_results:
-                    gutendx_results = self.search_gutendx(variation)
-                    all_results.extend(gutendx_results)
+            # Use only the fastest sources for Arabic queries
+            search_functions = [
+                (self.search_google_books, search_variations[0] if search_variations else title, True),  # prefer_arabic=True
+                (self.search_gutendx, search_variations[0] if search_variations else title, None),
+            ]
+
+            # Sequential processing for Arabic queries to avoid issues
+            for func, query, args in search_functions:
+                try:
+                    if args is None:
+                        results = func(query)
+                    else:
+                        results = func(query, args)
+                    all_results.extend(results)
+                    if len(all_results) >= max_results:
+                        break
+                except Exception as e:
+                    print(f"Arabic search function failed: {e}")
+                    continue
         else:
-            # For English queries, search in order of reliability
-            for variation in search_variations:
-                if len(all_results) < max_results:
-                    google_results = self.search_google_books(variation)
-                    all_results.extend(google_results)
-                
-                if len(all_results) < max_results:
-                    gutendx_results = self.search_gutendx(variation)
+            # For English queries, search sequentially to avoid network issues
+            try:
+                # Try Google Books first (most reliable)
+                google_results = self.search_google_books(search_variations[0] if search_variations else title)
+                all_results.extend(google_results)
+            except Exception as e:
+                print(f"Google Books search failed: {e}")
+
+            # Only try Gutendx if we need more results and Google worked
+            if len(all_results) < max_results:
+                try:
+                    gutendx_results = self.search_gutendx(search_variations[0] if search_variations else title)
                     all_results.extend(gutendx_results)
-                
-                if len(all_results) < max_results:
-                    ia_results = self.search_internet_archive(variation)
-                    all_results.extend(ia_results)
+                except Exception as e:
+                    print(f"Gutendx search failed: {e}")
+                    # Continue without Gutendx results
         
         # Remove duplicates and rank results
         unique_results = self._remove_duplicates(all_results)
         ranked_results = self._rank_results(unique_results, extracted_info)
 
-        # Enhance PDF URLs for results that don't have them
-        enhanced_results = self._enhance_pdf_urls(ranked_results[:max_results])
-
-        return enhanced_results
+        # Skip PDF enhancement for speed - return results directly
+        return ranked_results[:max_results]
     
     def search_google_books(self, query: str, prefer_arabic: bool = False) -> List[Dict]:
         """Search Google Books API."""
@@ -114,7 +114,7 @@ class ExternalAPIsService:
                 'printType': 'books'
             }
             
-            response = requests.get(self.google_books_api, params=params, timeout=10)
+            response = requests.get(self.google_books_api, params=params, timeout=3)
             response.raise_for_status()
             data = response.json()
             
@@ -186,7 +186,7 @@ class ExternalAPIsService:
                 'mime_type': 'application/pdf'
             }
 
-            response = requests.get(self.gutendx_api, params=params, timeout=10)
+            response = requests.get(self.gutendx_api, params=params, timeout=3)
             response.raise_for_status()
             data = response.json()
 

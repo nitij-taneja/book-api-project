@@ -54,11 +54,14 @@ class BookSerializer(serializers.ModelSerializer):
 
 class BookSearchResultSerializer(serializers.ModelSerializer):
     """Serializer for BookSearchResult model."""
-    
+
     categories_list = serializers.SerializerMethodField()
     ai_categories_list = serializers.SerializerMethodField()
     pdf_verified_status = serializers.SerializerMethodField()
-    
+    structured_categories = serializers.SerializerMethodField()
+    structured_author = serializers.SerializerMethodField()
+    ai_book_summary = serializers.SerializerMethodField()
+
     class Meta:
         model = BookSearchResult
         fields = [
@@ -66,9 +69,12 @@ class BookSearchResultSerializer(serializers.ModelSerializer):
             'search_session',
             'title',
             'author',
+            'structured_author',
             'description',
             'category',
             'categories_list',
+            'structured_categories',
+            'ai_book_summary',
             'cover_image_url',
             'pdf_url',
             'pdf_source',
@@ -108,6 +114,21 @@ class BookSearchResultSerializer(serializers.ModelSerializer):
             return 'verified'
         else:
             return 'unverified'
+
+    def get_structured_categories(self, obj):
+        """Get structured categories with icons and wiki links."""
+        # This will be populated from the enhanced results in the view
+        return getattr(obj, '_structured_categories', [])
+
+    def get_structured_author(self, obj):
+        """Get structured author information."""
+        # This will be populated from the enhanced results in the view
+        return getattr(obj, '_structured_author', {})
+
+    def get_ai_book_summary(self, obj):
+        """Get AI-generated book summary."""
+        # This will be populated from the enhanced results in the view
+        return getattr(obj, '_ai_book_summary', '')
 
 
 class BookCreateSerializer(serializers.ModelSerializer):
