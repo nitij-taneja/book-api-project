@@ -16,6 +16,79 @@ from .services.pdf_service import PDFService
 from .serializers import BookSerializer, BookSearchResultSerializer
 
 
+@api_view(['POST'])
+def analyze_book_description(request):
+    """
+    Analyze a book description and return categorized information.
+
+    Expected input:
+    {
+        "description": "Book description text...",
+        "language": "en" or "ar" (optional, defaults to "en")
+    }
+
+    Returns:
+    {
+        "categories": [
+            {
+                "name": "Category Name",
+                "icon": "📚",
+                "wikilink": "https://en.wikipedia.org/wiki/...",
+                "description": "80-130 word description"
+            }
+        ],
+        "analysis_summary": "Brief summary of the analysis"
+    }
+    """
+    try:
+        # Validate input
+        description = request.data.get('description', '').strip()
+        language = request.data.get('language', 'en')
+
+        if not description:
+            return Response(
+                {'error': 'Description is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if len(description) < 20:
+            return Response(
+                {'error': 'Description must be at least 20 characters long'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if language not in ['en', 'ar']:
+            return Response(
+                {'error': 'Language must be "en" or "ar"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Initialize LLM service
+        llm_service = LLMService()
+
+        # Analyze description and get categories
+        analysis_result = llm_service.analyze_description_for_categories(description, language)
+
+        return Response({
+            'categories': analysis_result.get('categories', []),
+            'analysis_summary': analysis_result.get('analysis_summary', ''),
+            'input_description': description,
+            'language': language,
+            'total_categories': len(analysis_result.get('categories', []))
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Description analysis failed with error: {e}")
+        print(f"Full traceback: {error_details}")
+
+        return Response(
+            {'error': f'Analysis failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def enhance_single_result(result, llm_service, language):
     """
     Helper function to enhance a single search result with LLM data.

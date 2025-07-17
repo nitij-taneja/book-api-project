@@ -10,7 +10,10 @@ app_name = 'books'
 urlpatterns = [
     # Main AI book search endpoint
     path('ai-search/', views.ai_book_search, name='ai_book_search'),
-    
+
+    # Analyze book description for categories
+    path('analyze-description/', views.analyze_book_description, name='analyze_book_description'),
+
     # Add book from search results
     path('add-from-search/', views.add_book_from_search, name='add_book_from_search'),
     

@@ -446,6 +446,123 @@ class LLMService:
                 "book_summary": self._ensure_word_count(fallback_summary, 100, language)
             }
 
+    def analyze_description_for_categories(self, description: str, language: str = 'en') -> Dict:
+        """
+        Analyze a book description and extract categories with detailed information.
+
+        Args:
+            description: Book description text
+            language: Language code ('en' or 'ar')
+
+        Returns:
+            Dict containing categories and analysis summary
+        """
+        if language == 'ar':
+            prompt = f"""
+            تحليل وصف الكتاب التالي وتحديد الفئات المناسبة له:
+
+            "{description}"
+
+            قم بإنشاء معلومات منظمة بتنسيق JSON:
+            {{
+                "categories": [
+                    {{
+                        "name": "اسم الفئة بالعربية",
+                        "icon": "رمز تعبيري مناسب",
+                        "wikilink": "https://ar.wikipedia.org/wiki/...",
+                        "description": "وصف مفصل للفئة من 100 كلمة عربية بالضبط"
+                    }}
+                ],
+                "analysis_summary": "ملخص موجز لتحليل الوصف وسبب اختيار هذه الفئات"
+            }}
+
+            ملاحظات مهمة:
+            - حدد 1-3 فئات رئيسية فقط بناءً على الوصف
+            - يجب أن يكون وصف كل فئة 100 كلمة عربية بالضبط
+            - استخدم رموز تعبيرية مناسبة: أدب 📖، تاريخ 📜، علوم 🔬، فلسفة 🤔، رومانسية 💕، غموض 🔍، سيرة ذاتية 👤، شعر 📝
+            - استخدم روابط ويكيبيديا عربية حقيقية
+            - قدم تحليلاً موجزاً يشرح سبب اختيار هذه الفئات
+            """
+        else:
+            prompt = f"""
+            Analyze the following book description and identify appropriate categories:
+
+            "{description}"
+
+            Create structured information in JSON format:
+            {{
+                "categories": [
+                    {{
+                        "name": "Category Name",
+                        "icon": "Appropriate emoji",
+                        "wikilink": "https://en.wikipedia.org/wiki/...",
+                        "description": "Detailed category description exactly 100 English words in length"
+                    }}
+                ],
+                "analysis_summary": "Brief summary of the analysis and why these categories were chosen"
+            }}
+
+            Important notes:
+            - Identify only 1-3 main categories based on the description
+            - Each category description must be exactly 100 words
+            - Use appropriate emojis: Fiction 📖, History 📜, Science 🔬, Philosophy 🤔, Romance 💕, Mystery 🔍, Biography 👤, Poetry 📝
+            - Use real English Wikipedia links
+            - Provide a brief analysis explaining why these categories were chosen
+            """
+
+        try:
+            import time
+            # Add small delay to avoid rate limiting
+            time.sleep(0.5)
+
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a precise content generator. You MUST follow word count requirements exactly. Count words carefully before responding."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=self.model,
+                response_format={"type": "json_object"},
+                temperature=0.0,  # Zero temperature for fastest, most deterministic results
+                max_tokens=1200,  # Increased tokens for longer descriptions
+                timeout=12  # Slightly longer timeout for detailed descriptions
+            )
+
+            response = json.loads(chat_completion.choices[0].message.content)
+
+            # Post-process to ensure word counts are correct
+            categories = response.get('categories', [])
+            for cat in categories:
+                desc = cat.get('description', '')
+                cat['description'] = self._ensure_word_count(desc, 100, language)
+
+            return {
+                "categories": categories,
+                "analysis_summary": response.get('analysis_summary', '')
+            }
+
+        except Exception as e:
+            print(f"LLM description analysis error: {e}")
+            # Fallback to simple structure with proper word counts
+            fallback_desc = "This category encompasses works that explore themes and ideas through narrative or informative content. It includes various styles and approaches to storytelling or knowledge sharing, appealing to different audiences with diverse interests and preferences." if language == 'en' else "تشمل هذه الفئة الأعمال التي تستكشف الموضوعات والأفكار من خلال المحتوى السردي أو المعلوماتي. وتتضمن أساليب ومناهج مختلفة لرواية القصص أو مشاركة المعرفة، وتجذب جماهير مختلفة ذات اهتمامات وتفضيلات متنوعة."
+
+            return {
+                "categories": [
+                    {
+                        "name": "Literature" if language == 'en' else "الأدب",
+                        "icon": "📚",
+                        "wikilink": "https://en.wikipedia.org/wiki/Literature" if language == 'en' else "https://ar.wikipedia.org/wiki/أدب",
+                        "description": self._ensure_word_count(fallback_desc, 100, language)
+                    }
+                ],
+                "analysis_summary": "Analysis based on the provided description." if language == 'en' else "تحليل بناءً على الوصف المقدم."
+            }
+
     def _ensure_word_count(self, text: str, target_words: int, language: str = 'en') -> str:
         """
         Ensure text meets the target word count by extending or trimming as needed.
