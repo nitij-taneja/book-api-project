@@ -17,6 +17,9 @@ urlpatterns = [
     # Analyze book description for categories
     path('analyze-description/', views.analyze_book_description, name='analyze_book_description'),
 
+    # Website/Company search endpoint
+    path('website-search/', views.website_search, name='website_search'),
+
     # Add book from search results
     path('add-from-search/', views.add_book_from_search, name='add_book_from_search'),
     

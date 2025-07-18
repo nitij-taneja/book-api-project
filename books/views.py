@@ -3,6 +3,7 @@ Django API views for AI-powered book addition functionality.
 """
 
 import uuid
+import json
 import concurrent.futures
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -206,6 +207,466 @@ def ai_book_search_no_db(request):
             {'error': f'Search failed: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+def website_search(request):
+    """
+    Website/Company search endpoint with comprehensive information.
+    No database operations - returns results directly.
+
+    Expected input:
+    {
+        "website_name": "Netflix",
+        "language": "en" (optional, defaults to "en")
+    }
+
+    Returns:
+    {
+        "name": "Netflix",
+        "website_icon": "https://netflix.com/favicon.ico",
+        "country": "United States",
+        "category": {
+            "name": "Entertainment",
+            "icon": "🎬",
+            "wikilink": "https://en.wikipedia.org/wiki/Entertainment",
+            "description": "90 word description of the category"
+        },
+        "brief_description": "Brief description about the website/company",
+        "comprehensive_description": "200 word detailed description",
+        "app_links": {
+            "playstore": "https://play.google.com/store/apps/details?id=...",
+            "appstore": "https://apps.apple.com/app/..."
+        },
+        "social_media": {
+            "youtube": "https://youtube.com/@netflix",
+            "instagram": "https://instagram.com/netflix",
+            "facebook": "https://facebook.com/netflix",
+            "twitter": "https://twitter.com/netflix"
+        },
+        "website_url": "https://netflix.com",
+        "founded": "1997",
+        "headquarters": "Los Gatos, California, USA"
+    }
+    """
+    try:
+        # Validate input
+        website_name = request.data.get('website_name', '').strip()
+        language = request.data.get('language', 'en')
+
+        if not website_name:
+            return Response(
+                {'error': 'website_name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if language not in ['en', 'ar']:
+            return Response(
+                {'error': 'Language must be "en" or "ar"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        start_time = timezone.now()
+
+        # Get comprehensive website information using LLM
+        try:
+            website_info = get_website_comprehensive_info(website_name, language)
+        except Exception as e:
+            print(f"LLM info failed: {e}")
+            website_info = get_fallback_website_info(website_name, language)
+
+        # Add website icon
+        if 'website_icon' not in website_info or not website_info['website_icon']:
+            website_info['website_icon'] = get_website_icon_url(website_name)
+
+        # Try to get additional info from free APIs if available
+        try:
+            additional_info = get_website_api_info(website_name)
+            if additional_info:
+                # Merge API data with LLM data
+                website_info.update(additional_info)
+        except Exception as e:
+            print(f"API info fetch failed: {e}")
+            # Continue with LLM data only
+
+        end_time = timezone.now()
+        search_time = (end_time - start_time).total_seconds()
+
+        # Add metadata
+        website_info['search_time'] = search_time
+        website_info['language'] = language
+        website_info['note'] = 'Website information without database storage'
+
+        return Response(website_info, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Website search failed with error: {e}")
+        print(f"Full traceback: {error_details}")
+
+        return Response(
+            {'error': f'Website search failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def get_website_comprehensive_info(website_name: str, language: str = 'en') -> dict:
+    """
+    Get comprehensive website/company information using LLM.
+
+    Args:
+        website_name: Name of the website/company
+        language: Language preference
+
+    Returns:
+        Dict with comprehensive website information
+    """
+    llm_service = LLMService()
+
+    if language == 'ar':
+        prompt = f"""
+        أنت مساعد بحث. ابحث عن معلومات حقيقية ودقيقة عن: "{website_name}"
+
+        أرجع JSON بهذا التنسيق المحدد:
+        {{
+            "name": "{website_name}",
+            "website_icon": "رابط أيقونة الموقع (تنسيق: https://{website_name.lower()}.com/favicon.ico)",
+            "country": "البلد الذي تأسست فيه (مثل: الولايات المتحدة، الصين، إلخ)",
+            "category": {{
+                "name": "فئة الصناعة العامة (مثل: الترفيه، التكنولوجيا، التجارة الإلكترونية، وسائل التواصل الاجتماعي، التعليم، المالية)",
+                "icon": "رمز تعبيري واحد مناسب (🎬 للترفيه، � للتكنولوجيا، 🛒 للتجارة، 📱 لوسائل التواصل، 📚 للتعليم، 💰 للمالية)",
+                "wikilink": "رابط ويكيبيديا عربي حقيقي للفئة",
+                "description": "90 كلمة بالضبط تشرح معنى هذه الفئة وما تشمله"
+            }},
+            "brief_description": "40 كلمة تصف ما يفعله {website_name}",
+            "comprehensive_description": "200 كلمة وصف مفصل لـ {website_name} وتاريخه وخدماته وتأثيره",
+            "app_links": {{
+                "playstore": "رابط Google Play Store الحقيقي إذا كان لدى {website_name} تطبيق، نص فارغ إذا لم يكن",
+                "appstore": "رابط Apple App Store الحقيقي إذا كان لدى {website_name} تطبيق، نص فارغ إذا لم يكن"
+            }},
+            "social_media": {{
+                "youtube": "رابط يوتيوب حقيقي (تنسيق: https://youtube.com/@{website_name.lower()})",
+                "instagram": "رابط إنستغرام حقيقي (تنسيق: https://instagram.com/{website_name.lower()})",
+                "facebook": "رابط فيسبوك حقيقي (تنسيق: https://facebook.com/{website_name.lower()})",
+                "twitter": "رابط تويتر/X حقيقي (تنسيق: https://twitter.com/{website_name.lower()})"
+            }},
+            "website_url": "رابط الموقع الرسمي",
+            "founded": "سنة التأسيس (مثل: 1997، 1998، إلخ)",
+            "headquarters": "مدينة، ولاية/بلد المقر الرئيسي"
+        }}
+
+        مهم جداً: استخدم معلومات حقيقية عن {website_name}. إذا لم تعرف التفاصيل الدقيقة، استخدم تقديرات معقولة بناءً على ما تعرفه عن الشركة.
+        """
+    else:
+        prompt = f"""
+        You are a research assistant. Find real, accurate information about: "{website_name}"
+
+        Return JSON with this exact structure:
+        {{
+            "name": "{website_name}",
+            "website_icon": "Website favicon URL (format: https://{website_name.lower()}.com/favicon.ico)",
+            "country": "Country where founded (e.g., United States, China, etc.)",
+            "category": {{
+                "name": "Broad industry category (e.g., Entertainment, Technology, E-commerce, Social Media, Education, Finance)",
+                "icon": "Single appropriate emoji (🎬 for entertainment, � for technology, 🛒 for e-commerce, 📱 for social media, 📚 for education, 💰 for finance)",
+                "wikilink": "Real Wikipedia URL for the category",
+                "description": "Exactly 90 words explaining what this category means and includes"
+            }},
+            "brief_description": "40 words describing what {website_name} does",
+            "comprehensive_description": "200 words detailed description of {website_name}, its history, services, and impact",
+            "app_links": {{
+                "playstore": "Real Google Play Store URL if {website_name} has an app, empty string if not",
+                "appstore": "Real Apple App Store URL if {website_name} has an app, empty string if not"
+            }},
+            "social_media": {{
+                "youtube": "Real YouTube channel URL (format: https://youtube.com/@{website_name.lower()})",
+                "instagram": "Real Instagram URL (format: https://instagram.com/{website_name.lower()})",
+                "facebook": "Real Facebook URL (format: https://facebook.com/{website_name.lower()})",
+                "twitter": "Real Twitter/X URL (format: https://twitter.com/{website_name.lower()})"
+            }},
+            "website_url": "Official website URL",
+            "founded": "Year founded (e.g., 1997, 1998, etc.)",
+            "headquarters": "City, State/Country of headquarters"
+        }}
+
+        CRITICAL: Use REAL information about {website_name}. If you don't know exact details, use reasonable estimates based on what you know about the company.
+        """
+
+    try:
+        import time
+        time.sleep(0.5)  # Rate limiting
+
+        chat_completion = llm_service.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise information researcher. Provide accurate, real information about websites and companies. Follow word count requirements exactly."
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model=llm_service.model,
+            response_format={"type": "json_object"},
+            temperature=0.0,  # Zero temperature for most consistent results
+            max_tokens=1500,
+            timeout=15
+        )
+
+        response = json.loads(chat_completion.choices[0].message.content)
+
+        # Ensure word counts are correct
+        if 'category' in response and 'description' in response['category']:
+            response['category']['description'] = ensure_word_count(
+                response['category']['description'], 90, language
+            )
+
+        if 'comprehensive_description' in response:
+            response['comprehensive_description'] = ensure_word_count(
+                response['comprehensive_description'], 200, language
+            )
+
+        return response
+
+    except Exception as e:
+        print(f"LLM website info error: {e}")
+        # Fallback response
+        return get_fallback_website_info(website_name, language)
+
+
+def get_website_icon_url(website_name: str) -> str:
+    """
+    Get the website icon URL using common patterns.
+
+    Args:
+        website_name: Name of the website
+
+    Returns:
+        URL to the website's favicon
+    """
+    website_lower = website_name.lower()
+
+    # Common favicon patterns for popular websites
+    icon_patterns = {
+        'netflix': 'https://assets.nflxext.com/us/ffe/siteui/common/icons/nficon2016.ico',
+        'google': 'https://www.google.com/favicon.ico',
+        'youtube': 'https://www.youtube.com/favicon.ico',
+        'facebook': 'https://static.xx.fbcdn.net/rsrc.php/yo/r/iRmz9lCMBD2.ico',
+        'instagram': 'https://static.cdninstagram.com/rsrc.php/v3/yt/r/30PrGfR3xhI.ico',
+        'twitter': 'https://abs.twimg.com/favicons/twitter.3.ico',
+        'amazon': 'https://www.amazon.com/favicon.ico',
+        'microsoft': 'https://www.microsoft.com/favicon.ico',
+        'apple': 'https://www.apple.com/favicon.ico',
+        'linkedin': 'https://static.licdn.com/sc/h/al2o9zrvru7aqj8e1x2rzsrca',
+        'tiktok': 'https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_login_static/tiktok/webapp/main/webapp-desktop/8152caf0c8e8bc67ae0d.ico'
+    }
+
+    # Return specific icon if available, otherwise use standard favicon pattern
+    return icon_patterns.get(website_lower, f"https://{website_lower}.com/favicon.ico")
+
+
+def get_website_api_info(website_name: str) -> dict:
+    """
+    Try to get additional website information from free APIs.
+
+    Args:
+        website_name: Name of the website/company
+
+    Returns:
+        Dict with additional API information
+    """
+    additional_info = {}
+
+    try:
+        # Try to get domain information (example with a hypothetical free API)
+        # You can replace this with actual free APIs like:
+        # - Clearbit API (has free tier)
+        # - Hunter.io API (has free tier)
+        # - Company information APIs
+
+        # For now, we'll use a simple approach to construct likely URLs
+        website_lower = website_name.lower()
+
+        # Common website patterns
+        likely_website = f"https://{website_lower}.com"
+
+        # Common social media patterns
+        social_patterns = {
+            "youtube": f"https://youtube.com/@{website_lower}",
+            "instagram": f"https://instagram.com/{website_lower}",
+            "facebook": f"https://facebook.com/{website_lower}",
+            "twitter": f"https://twitter.com/{website_lower}"
+        }
+
+        # Common app store patterns (these would need to be verified)
+        app_patterns = {
+            "playstore": f"https://play.google.com/store/search?q={website_name}",
+            "appstore": f"https://apps.apple.com/search?term={website_name}"
+        }
+
+        additional_info = {
+            "api_website_url": likely_website,
+            "api_social_media": social_patterns,
+            "api_app_links": app_patterns
+        }
+
+    except Exception as e:
+        print(f"API info fetch error: {e}")
+
+    return additional_info
+
+
+def get_fallback_website_info(website_name: str, language: str) -> dict:
+    """
+    Fallback website information when LLM fails.
+
+    Args:
+        website_name: Name of the website/company
+        language: Language preference
+
+    Returns:
+        Basic website information structure
+    """
+    # Try to guess category based on common website names
+    website_lower = website_name.lower()
+
+    if website_lower in ['netflix', 'youtube', 'disney', 'hulu', 'spotify']:
+        category_name = "الترفيه" if language == 'ar' else "Entertainment"
+        category_icon = "🎬"
+        category_wiki = "https://ar.wikipedia.org/wiki/ترفيه" if language == 'ar' else "https://en.wikipedia.org/wiki/Entertainment"
+    elif website_lower in ['google', 'microsoft', 'apple', 'amazon', 'meta']:
+        category_name = "التكنولوجيا" if language == 'ar' else "Technology"
+        category_icon = "💻"
+        category_wiki = "https://ar.wikipedia.org/wiki/تكنولوجيا" if language == 'ar' else "https://en.wikipedia.org/wiki/Technology"
+    elif website_lower in ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok']:
+        category_name = "وسائل التواصل الاجتماعي" if language == 'ar' else "Social Media"
+        category_icon = "📱"
+        category_wiki = "https://ar.wikipedia.org/wiki/وسائل_التواصل_الاجتماعي" if language == 'ar' else "https://en.wikipedia.org/wiki/Social_media"
+    elif website_lower in ['amazon', 'ebay', 'alibaba', 'shopify']:
+        category_name = "التجارة الإلكترونية" if language == 'ar' else "E-commerce"
+        category_icon = "🛒"
+        category_wiki = "https://ar.wikipedia.org/wiki/تجارة_إلكترونية" if language == 'ar' else "https://en.wikipedia.org/wiki/E-commerce"
+    else:
+        category_name = "التكنولوجيا" if language == 'ar' else "Technology"
+        category_icon = "💻"
+        category_wiki = "https://ar.wikipedia.org/wiki/تكنولوجيا" if language == 'ar' else "https://en.wikipedia.org/wiki/Technology"
+
+    if language == 'ar':
+        return {
+            "name": website_name,
+            "website_icon": get_website_icon_url(website_name),
+            "country": "غير محدد",
+            "category": {
+                "name": category_name,
+                "icon": category_icon,
+                "wikilink": category_wiki,
+                "description": ensure_word_count(f"فئة {category_name} تشمل الشركات والمواقع التي تقدم خدمات متنوعة في هذا المجال", 90, 'ar')
+            },
+            "brief_description": f"موقع {website_name} في مجال {category_name}",
+            "comprehensive_description": ensure_word_count(f"موقع {website_name} هو منصة رقمية في مجال {category_name}", 200, 'ar'),
+            "app_links": {"playstore": "", "appstore": ""},
+            "social_media": {"youtube": "", "instagram": "", "facebook": "", "twitter": ""},
+            "website_url": f"https://{website_name.lower()}.com",
+            "founded": "غير محدد",
+            "headquarters": "غير محدد"
+        }
+    else:
+        return {
+            "name": website_name,
+            "website_icon": get_website_icon_url(website_name),
+            "country": "Unknown",
+            "category": {
+                "name": category_name,
+                "icon": category_icon,
+                "wikilink": category_wiki,
+                "description": ensure_word_count(f"The {category_name} industry includes companies and platforms that provide various services in this field", 90, 'en')
+            },
+            "brief_description": f"{website_name} is a platform in the {category_name} industry",
+            "comprehensive_description": ensure_word_count(f"{website_name} is a digital platform operating in the {category_name} sector", 200, 'en'),
+            "app_links": {"playstore": "", "appstore": ""},
+            "social_media": {"youtube": "", "instagram": "", "facebook": "", "twitter": ""},
+            "website_url": f"https://{website_name.lower()}.com",
+            "founded": "Unknown",
+            "headquarters": "Unknown"
+        }
+
+
+def ensure_word_count(text: str, target_words: int, language: str = 'en') -> str:
+    """
+    Ensure text meets the target word count.
+
+    Args:
+        text: Original text
+        target_words: Target word count
+        language: Language for extensions
+
+    Returns:
+        Text with correct word count
+    """
+    if not text:
+        # Create basic text if empty
+        if language == 'ar':
+            base_text = "هذا وصف أساسي للموضوع المطلوب"
+        else:
+            base_text = "This is a basic description of the requested topic"
+        text = base_text
+
+    words = text.split()
+    current_count = len(words)
+
+    # If already correct, return as is
+    if current_count == target_words:
+        return text
+
+    # If too long, truncate
+    elif current_count > target_words:
+        return ' '.join(words[:target_words])
+
+    # If too short, extend carefully
+    else:
+        # Only add a few words to reach target, don't over-extend
+        words_needed = target_words - current_count
+
+        # Create a more natural extension
+        if language == 'ar':
+            if words_needed <= 5:
+                extension = "وغيرها من الخدمات المميزة."
+            elif words_needed <= 10:
+                extension = "وغيرها من الخدمات المميزة التي تلبي احتياجات المستخدمين."
+            elif words_needed <= 15:
+                extension = "وغيرها من الخدمات المميزة التي تلبي احتياجات المستخدمين في مختلف أنحاء العالم."
+            else:
+                extension = "وغيرها من الخدمات المميزة التي تلبي احتياجات المستخدمين في مختلف أنحاء العالم، مما يجعلها خياراً مفضلاً للكثيرين."
+        else:
+            if words_needed <= 5:
+                extension = "and other similar services."
+            elif words_needed <= 10:
+                extension = "and other similar services that meet user needs and expectations."
+            elif words_needed <= 15:
+                extension = "and other similar services that meet user needs and expectations in various markets worldwide."
+            else:
+                extension = "and other similar services that meet user needs and expectations in various markets worldwide, making it a preferred choice for many users globally."
+
+        # Add the extension and check if we need more words
+        extension_words = extension.split()
+        words.extend(extension_words[:min(words_needed, len(extension_words))])
+
+        # If we still need more words, add a natural conclusion
+        if len(words) < target_words:
+            remaining_words = target_words - len(words)
+
+            if language == 'ar':
+                conclusion = "هذه المنصة تستمر في التطور والنمو لتقديم أفضل تجربة ممكنة للمستخدمين في جميع أنحاء العالم."
+            else:
+                conclusion = "This platform continues to evolve and grow to provide the best possible experience for users around the world."
+
+            conclusion_words = conclusion.split()
+            words.extend(conclusion_words[:min(remaining_words, len(conclusion_words))])
+
+        # Final check to ensure exact count
+        return ' '.join(words[:target_words])
 
 
 def enhance_single_result(result, llm_service, language):
