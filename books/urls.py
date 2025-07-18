@@ -26,6 +26,9 @@ urlpatterns = [
     # Category information endpoint
     path('category-search/', views.category_search, name='category_search'),
 
+    # Company/Stock search endpoint
+    path('company-search/', views.company_search, name='company_search'),
+
     # Add book from search results
     path('add-from-search/', views.add_book_from_search, name='add_book_from_search'),
     
