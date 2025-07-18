@@ -20,6 +20,9 @@ urlpatterns = [
     # Website/Company search endpoint
     path('website-search/', views.website_search, name='website_search'),
 
+    # Author search endpoint
+    path('author-search/', views.author_search, name='author_search'),
+
     # Add book from search results
     path('add-from-search/', views.add_book_from_search, name='add_book_from_search'),
     
