@@ -388,6 +388,258 @@ def author_search(request):
         )
 
 
+@api_view(['POST'])
+def category_search(request):
+    """
+    Category information endpoint with comprehensive details.
+    No database operations - returns results directly.
+
+    Expected input:
+    {
+        "category_name": "Entertainment",
+        "language": "en" (optional, defaults to "en")
+    }
+
+    Returns:
+    {
+        "name": "Entertainment",
+        "icon": "🎬",
+        "wikilink": "https://en.wikipedia.org/wiki/Entertainment",
+        "description": "150 word comprehensive description of the category",
+        "subcategories": ["Movies", "Music", "Television", "Gaming"],
+        "related_fields": ["Media", "Arts", "Culture"],
+        "industry_size": "Global entertainment industry overview",
+        "notable_companies": ["Disney", "Netflix", "Warner Bros"]
+    }
+    """
+    try:
+        # Validate input
+        category_name = request.data.get('category_name', '').strip()
+        language = request.data.get('language', 'en')
+
+        if not category_name:
+            return Response(
+                {'error': 'category_name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if language not in ['en', 'ar']:
+            return Response(
+                {'error': 'Language must be "en" or "ar"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        start_time = timezone.now()
+
+        # Get comprehensive category information using LLM
+        try:
+            category_info = get_category_comprehensive_info(category_name, language)
+        except Exception as e:
+            print(f"LLM category info failed: {e}")
+            category_info = get_fallback_category_info(category_name, language)
+
+        end_time = timezone.now()
+        search_time = (end_time - start_time).total_seconds()
+
+        # Add metadata
+        category_info['search_time'] = search_time
+        category_info['language'] = language
+        category_info['note'] = 'Category information without database storage'
+
+        return Response(category_info, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Category search failed with error: {e}")
+        print(f"Full traceback: {error_details}")
+
+        return Response(
+            {'error': f'Category search failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def get_category_comprehensive_info(category_name: str, language: str = 'en') -> dict:
+    """
+    Get comprehensive category information using LLM.
+
+    Args:
+        category_name: Name of the category
+        language: Language preference
+
+    Returns:
+        Dict with comprehensive category information
+    """
+    llm_service = LLMService()
+
+    if language == 'ar':
+        prompt = f"""
+        أنت مساعد بحث متخصص في الصناعات والفئات. ابحث عن معلومات شاملة عن الفئة: "{category_name}"
+
+        أرجع JSON بهذا التنسيق المحدد:
+        {{
+            "name": "اسم الفئة بالعربية",
+            "icon": "رمز تعبيري مناسب واحد",
+            "wikilink": "https://ar.wikipedia.org/wiki/...",
+            "description": "وصف شامل من 150 كلمة عربية بالضبط يشرح الفئة وأهميتها ومجالاتها",
+            "subcategories": ["قائمة بالفئات الفرعية بالعربية"],
+            "related_fields": ["قائمة بالمجالات ذات الصلة بالعربية"],
+            "industry_size": "نظرة عامة على حجم الصناعة وأهميتها الاقتصادية",
+            "notable_companies": ["قائمة بالشركات المشهورة في هذا المجال"]
+        }}
+
+        ملاحظات مهمة:
+        - استخدم معلومات حقيقية ودقيقة عن الفئة
+        - الوصف: 150 كلمة عربية بالضبط
+        - الرمز التعبيري: واحد فقط ومناسب للفئة
+        - الفئات الفرعية: 3-6 فئات فرعية مهمة
+        - المجالات ذات الصلة: 3-5 مجالات مرتبطة
+        - استخدم روابط ويكيبيديا عربية حقيقية
+        - الشركات: أسماء شركات حقيقية ومشهورة
+        """
+    else:
+        prompt = f"""
+        You are an industry and category research specialist. Find comprehensive information about the category: "{category_name}"
+
+        Return JSON with this exact structure:
+        {{
+            "name": "{category_name}",
+            "icon": "Single appropriate emoji for this category",
+            "wikilink": "https://en.wikipedia.org/wiki/...",
+            "description": "Exactly 150 English words comprehensive description explaining the category, its importance, and scope",
+            "subcategories": ["List of main subcategories"],
+            "related_fields": ["List of related fields and industries"],
+            "industry_size": "Overview of industry size and economic importance",
+            "notable_companies": ["List of major companies in this field"]
+        }}
+
+        Important notes:
+        - Use real and accurate information about the category
+        - Description: exactly 150 English words
+        - Icon: single emoji that best represents the category
+        - Subcategories: 3-6 main subcategories
+        - Related fields: 3-5 connected industries or fields
+        - Use real English Wikipedia links
+        - Companies: real, well-known companies in this field
+        - Industry size: brief overview of economic impact and scale
+        """
+
+    try:
+        import time
+        time.sleep(0.5)  # Rate limiting
+
+        chat_completion = llm_service.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise industry researcher. Provide accurate, real information about categories and industries. Follow word count requirements exactly."
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model=llm_service.model,
+            response_format={"type": "json_object"},
+            temperature=0.0,  # Zero temperature for most consistent results
+            max_tokens=1000,
+            timeout=15
+        )
+
+        response = json.loads(chat_completion.choices[0].message.content)
+
+        # Ensure description word count is correct
+        if 'description' in response:
+            response['description'] = ensure_word_count(response['description'], 150, language)
+
+        return response
+
+    except Exception as e:
+        print(f"LLM category info error: {e}")
+        # Fallback response
+        return get_fallback_category_info(category_name, language)
+
+
+def get_fallback_category_info(category_name: str, language: str) -> dict:
+    """
+    Fallback category information when LLM fails.
+
+    Args:
+        category_name: Name of the category
+        language: Language preference
+
+    Returns:
+        Basic category information structure
+    """
+    # Map common categories to icons and basic info
+    category_lower = category_name.lower()
+
+    category_mappings = {
+        'entertainment': {
+            'icon': '🎬',
+            'subcategories_en': ['Movies', 'Music', 'Television', 'Gaming', 'Theater'],
+            'subcategories_ar': ['أفلام', 'موسيقى', 'تلفزيون', 'ألعاب', 'مسرح'],
+            'companies': ['Disney', 'Netflix', 'Warner Bros', 'Sony Entertainment']
+        },
+        'technology': {
+            'icon': '💻',
+            'subcategories_en': ['Software', 'Hardware', 'AI', 'Cloud Computing', 'Mobile'],
+            'subcategories_ar': ['برمجيات', 'أجهزة', 'ذكاء اصطناعي', 'حوسبة سحابية', 'هواتف'],
+            'companies': ['Apple', 'Google', 'Microsoft', 'Amazon']
+        },
+        'education': {
+            'icon': '📚',
+            'subcategories_en': ['K-12 Education', 'Higher Education', 'Online Learning', 'Vocational Training'],
+            'subcategories_ar': ['التعليم الأساسي', 'التعليم العالي', 'التعلم الإلكتروني', 'التدريب المهني'],
+            'companies': ['Pearson', 'McGraw-Hill', 'Coursera', 'Khan Academy']
+        },
+        'healthcare': {
+            'icon': '🏥',
+            'subcategories_en': ['Hospitals', 'Pharmaceuticals', 'Medical Devices', 'Telemedicine'],
+            'subcategories_ar': ['مستشفيات', 'أدوية', 'أجهزة طبية', 'طب عن بعد'],
+            'companies': ['Johnson & Johnson', 'Pfizer', 'UnitedHealth', 'Roche']
+        },
+        'finance': {
+            'icon': '💰',
+            'subcategories_en': ['Banking', 'Insurance', 'Investment', 'Fintech'],
+            'subcategories_ar': ['مصرفية', 'تأمين', 'استثمار', 'تكنولوجيا مالية'],
+            'companies': ['JPMorgan Chase', 'Bank of America', 'Goldman Sachs', 'PayPal']
+        }
+    }
+
+    # Get mapping or use defaults
+    mapping = category_mappings.get(category_lower, {
+        'icon': '🏢',
+        'subcategories_en': ['Various Sectors'],
+        'subcategories_ar': ['قطاعات متنوعة'],
+        'companies': ['Various Companies']
+    })
+
+    if language == 'ar':
+        return {
+            "name": category_name,
+            "icon": mapping['icon'],
+            "wikilink": f"https://ar.wikipedia.org/wiki/{category_name}",
+            "description": ensure_word_count(f"فئة {category_name} تشمل مجموعة واسعة من الأنشطة والخدمات المهمة", 150, 'ar'),
+            "subcategories": mapping.get('subcategories_ar', ['قطاعات متنوعة']),
+            "related_fields": ["الأعمال", "التكنولوجيا", "الاقتصاد"],
+            "industry_size": "صناعة كبيرة ومهمة اقتصادياً",
+            "notable_companies": mapping['companies']
+        }
+    else:
+        return {
+            "name": category_name,
+            "icon": mapping['icon'],
+            "wikilink": f"https://en.wikipedia.org/wiki/{category_name}",
+            "description": ensure_word_count(f"The {category_name} category encompasses a wide range of important activities and services", 150, 'en'),
+            "subcategories": mapping.get('subcategories_en', ['Various Sectors']),
+            "related_fields": ["Business", "Technology", "Economics"],
+            "industry_size": "Large and economically significant industry",
+            "notable_companies": mapping['companies']
+        }
+
+
 def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dict:
     """
     Get comprehensive author information using LLM.

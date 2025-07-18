@@ -23,6 +23,9 @@ urlpatterns = [
     # Author search endpoint
     path('author-search/', views.author_search, name='author_search'),
 
+    # Category information endpoint
+    path('category-search/', views.category_search, name='category_search'),
+
     # Add book from search results
     path('add-from-search/', views.add_book_from_search, name='add_book_from_search'),
     
