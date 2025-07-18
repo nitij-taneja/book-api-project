@@ -11,6 +11,9 @@ urlpatterns = [
     # Main AI book search endpoint
     path('ai-search/', views.ai_book_search, name='ai_book_search'),
 
+    # AI book search without database operations
+    path('ai-search-no-db/', views.ai_book_search_no_db, name='ai_book_search_no_db'),
+
     # Analyze book description for categories
     path('analyze-description/', views.analyze_book_description, name='analyze_book_description'),
 

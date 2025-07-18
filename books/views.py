@@ -89,6 +89,125 @@ def analyze_book_description(request):
         )
 
 
+@api_view(['POST'])
+def ai_book_search_no_db(request):
+    """
+    AI-powered book search WITHOUT database operations.
+    Returns enhanced search results directly without saving anything.
+
+    Expected input:
+    {
+        "book_name": "Pride and Prejudice",
+        "language": "en" (optional, defaults to "en"),
+        "max_results": 5 (optional, defaults to 5)
+    }
+
+    Returns:
+    {
+        "results": [
+            {
+                "title": "Book Title",
+                "author": "Author Name",
+                "structured_author": {...},
+                "structured_categories": [...],
+                "ai_book_summary": "...",
+                "description": "...",
+                "pdf_url": "...",
+                "cover_image_url": "...",
+                "isbn": "...",
+                "publication_date": "...",
+                "publisher": "...",
+                "source_api": "...",
+                "relevance_score": 0.0
+            }
+        ],
+        "total_found": 5,
+        "extracted_info": {...},
+        "search_time": 15.2,
+        "language": "en"
+    }
+    """
+    try:
+        # Validate input
+        book_name = request.data.get('book_name', '').strip()
+        language = request.data.get('language', 'en')
+        max_results = request.data.get('max_results', 5)
+
+        if not book_name:
+            return Response(
+                {'error': 'book_name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if language not in ['en', 'ar']:
+            return Response(
+                {'error': 'Language must be "en" or "ar"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not isinstance(max_results, int) or max_results < 1 or max_results > 20:
+            return Response(
+                {'error': 'max_results must be an integer between 1 and 20'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        start_time = timezone.now()
+
+        # Step 1: Extract information from query using LLM
+        llm_service = LLMService()
+        extracted_info = llm_service.extract_book_info(book_name, language)
+
+        # Step 2: Search external APIs
+        external_apis = ExternalAPIsService()
+        search_results = external_apis.search_all_sources(extracted_info, max_results)
+
+        if not search_results:
+            return Response({
+                'results': [],
+                'total_found': 0,
+                'extracted_info': extracted_info,
+                'search_time': (timezone.now() - start_time).total_seconds(),
+                'language': language,
+                'message': 'No books found matching your search criteria'
+            }, status=status.HTTP_200_OK)
+
+        # Step 3: Enhance results with LLM-generated content (no database operations)
+        enhanced_results = []
+
+        for result in search_results:
+            try:
+                enhanced_result = enhance_single_result(result, llm_service, language)
+                enhanced_results.append(enhanced_result)
+            except Exception as e:
+                print(f"Error enhancing result: {e}")
+                # Add the original result if enhancement fails
+                enhanced_results.append(result)
+
+        end_time = timezone.now()
+        search_time = (end_time - start_time).total_seconds()
+
+        # Return results directly without any database operations
+        return Response({
+            'results': enhanced_results,
+            'total_found': len(enhanced_results),
+            'extracted_info': extracted_info,
+            'search_time': search_time,
+            'language': language,
+            'note': 'Results returned without database storage'
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Search failed with error: {e}")
+        print(f"Full traceback: {error_details}")
+
+        return Response(
+            {'error': f'Search failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def enhance_single_result(result, llm_service, language):
     """
     Helper function to enhance a single search result with LLM data.
