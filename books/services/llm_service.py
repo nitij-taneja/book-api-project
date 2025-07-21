@@ -310,41 +310,57 @@ class LLMService:
         categories_str = ", ".join(categories) if categories else "Unknown"
 
         if language == 'ar':
-            prompt = f"""
-            للكتاب "{book_title}" للمؤلف "{author_name}" مع الفئات: {categories_str}
+            # Translate categories to Arabic first
+            arabic_categories = []
+            for cat in categories:
+                arabic_translations = {
+                    'fiction': 'خيال', 'romance': 'رومانسية', 'history': 'تاريخ',
+                    'science': 'علوم', 'philosophy': 'فلسفة', 'poetry': 'شعر',
+                    'novel': 'رواية', 'biography': 'سيرة ذاتية', 'mystery': 'غموض',
+                    'adventure': 'مغامرة', 'drama': 'دراما', 'comedy': 'كوميديا',
+                    'literature': 'أدب', 'courtship': 'خطوبة', 'classic': 'كلاسيكي',
+                    'fantasy': 'فانتازيا', 'thriller': 'إثارة', 'horror': 'رعب'
+                }
+                arabic_cat = arabic_translations.get(cat.lower(), cat)
+                arabic_categories.append(arabic_cat)
 
-            أنشئ معلومات منظمة بتنسيق JSON باللغة العربية فقط:
+            categories_str_ar = ", ".join(arabic_categories)
+
+            prompt = f"""
+            للكتاب "{book_title}" للمؤلف "{author_name}" مع الفئات: {categories_str_ar}
+
+            أنشئ معلومات منظمة باللغة العربية فقط بتنسيق JSON:
             {{
                 "categories": [
                     {{
-                        "name": "اسم الفئة بالعربية",
-                        "icon": "📚",
+                        "name": "اسم الفئة بالعربية فقط (مثل: خيال، رومانسية، تاريخ)",
+                        "icon": "رمز تعبيري مناسب",
                         "wikilink": "https://ar.wikipedia.org/wiki/...",
-                        "description": "اكتب وصفاً مفصلاً من 60 كلمة عربية بالضبط للفئة. يجب أن يشمل الوصف تعريف الفئة وأهميتها وخصائصها الرئيسية وأمثلة عليها. اجعل الوصف غنياً بالمعلومات ومفيداً للقارئ العربي."
+                        "description": "وصف مفصل للفئة من 60 كلمة عربية بالضبط"
                     }}
                 ],
                 "author": {{
                     "name": "{author_name}",
-                    "pic": "/static/images/authors/default.jpg",
+                    "image": "https://ui-avatars.com/api/?name={author_name.replace(' ', '+')}&size=300&background=6366f1&color=ffffff&format=png&bold=true",
                     "wikilink": "https://ar.wikipedia.org/wiki/...",
-                    "profession": "كاتب/روائي/شاعر/مؤلف",
-                    "description": "اكتب وصفاً مفصلاً من 60 كلمة عربية بالضبط عن المؤلف. يجب أن يشمل الوصف حياته وأعماله الأدبية وإنجازاته وتأثيره على الأدب. اجعل الوصف شاملاً ومعلوماتياً."
+                    "profession": ["كاتب", "روائي", "شاعر"],
+                    "descriptions": [
+                        "وصف مختصر للمؤلف من 60 كلمة عربية بالضبط يتضمن حياته وأعماله",
+                        "معلومات إضافية عن إنجازاته وتأثيره الأدبي"
+                    ]
                 }},
-                "book_summary": "اكتب ملخصاً مفصلاً من 100 كلمة عربية بالضبط عن الكتاب. يجب أن يشمل الملخص القصة الرئيسية والشخصيات والموضوعات والأهمية الأدبية للكتاب."
+                "book_summary": "ملخص الكتاب من 100 كلمة عربية بالضبط"
             }}
 
-            مهم جداً - اتبع هذه القواعد بدقة:
-            - كل النصوص يجب أن تكون بالعربية الفصحى فقط
-            - وصف كل فئة: يجب أن يكون بالضبط 50-70 كلمة عربية (عد الكلمات!)
-            - وصف المؤلف: يجب أن يكون بالضبط 50-70 كلمة عربية (عد الكلمات!)
-            - ملخص الكتاب: يجب أن يكون بالضبط 80-120 كلمة عربية (عد الكلمات!)
+            قواعد صارمة - يجب اتباعها بدقة:
+            - جميع أسماء الفئات يجب أن تكون بالعربية فقط (خيال، رومانسية، تاريخ، أدب، شعر، إلخ)
+            - جميع الأوصاف والنصوص يجب أن تكون بالعربية الفصحى فقط
+            - لا تستخدم أي كلمات إنجليزية أو لاتينية في أي مكان
+            - ترجم أي مصطلحات إنجليزية إلى العربية
             - استخدم روابط ويكيبيديا عربية حقيقية
-            - أيقونات مناسبة: أدب 📖، تاريخ 📜، علوم 🔬، فلسفة 🤔، رومانسية 💕
-
-            مثال على وصف صحيح (60 كلمة عربية بالضبط): "الأدب هو فن التعبير عن المشاعر والأفكار والتجارب الإنسانية من خلال الكلمات المكتوبة بطريقة جميلة ومؤثرة. يشمل الأدب الروايات والقصص القصيرة والشعر والمسرحيات والمقالات الأدبية المتنوعة. يهدف الأدب إلى إثراء الثقافة الإنسانية ونقل القيم والمعارف والتجارب عبر الأجيال المختلفة. يعكس الأدب تطور المجتمعات وتنوع الثقافات والحضارات."
-
-            تذكر: يجب أن يكون كل وصف 60 كلمة عربية بالضبط. لا أكثر ولا أقل.
+            - الأوصاف يجب أن تكون بالعدد المحدد من الكلمات العربية
             """
+
         else:
             prompt = f"""
             For the book "{book_title}" by "{author_name}" with categories: {categories_str}
@@ -361,26 +377,27 @@ class LLMService:
                 ],
                 "author": {{
                     "name": "{author_name}",
-                    "pic": "/static/images/authors/default.jpg",
+                    "image": "real author image URL or placeholder",
                     "wikilink": "https://en.wikipedia.org/wiki/...",
-                    "profession": "writer/novelist/poet/author",
-                    "description": "Write exactly 60 English words describing this author. Include their life, major works, literary achievements, writing style, and impact on literature. Make it comprehensive and informative."
+                    "profession": ["Writer", "Novelist", "Poet"],
+                    "descriptions": [
+                        "Write exactly 60 English words describing this author's life, major works, and literary achievements",
+                        "Additional information about their writing style, impact on literature, and significance"
+                    ]
                 }},
                 "book_summary": "Write exactly 100 English words summarizing this book. Include the main plot, characters, themes, literary significance, and why it's important. Make it detailed and engaging."
             }}
 
             CRITICAL REQUIREMENTS - Follow these rules exactly:
             - ALL text must be in English only
-            - Category description: EXACTLY 50-70 English words (count the words!)
-            - Author description: EXACTLY 50-70 English words (count the words!)
-            - Book summary: EXACTLY 80-120 English words (count the words!)
+            - Category description: EXACTLY 60 English words (count the words!)
+            - Author description: EXACTLY 60 English words (count the words!)
+            - Book summary: EXACTLY 100 English words (count the words!)
             - Use appropriate emojis: Fiction 📖, Science 🔬, History 📜, Philosophy 🤔, Romance 💕, Mystery 🔍, Biography 👤, Poetry 📝
             - Use real Wikipedia links when possible
             - Be detailed and informative
 
-            Example correct description (exactly 60 words): "Fiction is a literary genre that presents imaginary characters and events created from the author's imagination rather than factual accounts or real experiences. It encompasses novels, short stories, and novellas that explore human nature, social issues, and philosophical questions through creative narrative storytelling techniques. Popular subgenres include romance, mystery, science fiction, fantasy, and historical fiction, each offering unique perspectives on human experience."
-
-            Remember: Each description must be exactly 60 English words. No more, no less.
+            Remember: Each description must be exactly the specified word count. No more, no less.
             """
 
         try:
@@ -434,14 +451,64 @@ class LLMService:
             fallback_author_desc = "This author has contributed significantly to literature through their various works and writings." if language == 'en' else "هذا المؤلف ساهم بشكل كبير في الأدب من خلال أعماله وكتاباته المختلفة."
             fallback_summary = "This book represents an important work in literature that explores various themes and characters through engaging storytelling." if language == 'en' else "هذا الكتاب يمثل عملاً مهماً في الأدب يستكشف موضوعات وشخصيات مختلفة من خلال السرد الممتع."
 
+            # Translate category names to Arabic if needed
+            translated_categories = []
+            for cat in categories:
+                if language == 'ar':
+                    # Simple translation mapping for common categories
+                    arabic_translations = {
+                        'fiction': 'خيال', 'romance': 'رومانسية', 'history': 'تاريخ',
+                        'science': 'علوم', 'philosophy': 'فلسفة', 'poetry': 'شعر',
+                        'novel': 'رواية', 'biography': 'سيرة ذاتية', 'mystery': 'غموض',
+                        'adventure': 'مغامرة', 'drama': 'دراما', 'comedy': 'كوميديا',
+                        'literature': 'أدب', 'courtship': 'خطوبة', 'classic': 'كلاسيكي'
+                    }
+                    translated_name = arabic_translations.get(cat.lower(), cat)
+                    translated_categories.append(translated_name)
+                else:
+                    translated_categories.append(cat)
+
+            # Create categories with proper icons
+            categories_with_icons = []
+            for cat in translated_categories:
+                # Map categories to appropriate icons
+                icon_mapping = {
+                    'خيال': '📖', 'fiction': '📖',
+                    'رومانسية': '💕', 'romance': '💕',
+                    'تاريخ': '📜', 'history': '📜',
+                    'علوم': '🔬', 'science': '🔬',
+                    'فلسفة': '🤔', 'philosophy': '🤔',
+                    'شعر': '📝', 'poetry': '📝',
+                    'رواية': '📖', 'novel': '📖',
+                    'سيرة ذاتية': '👤', 'biography': '👤',
+                    'غموض': '🔍', 'mystery': '🔍',
+                    'مغامرة': '⚔️', 'adventure': '⚔️',
+                    'دراما': '🎭', 'drama': '🎭',
+                    'كوميديا': '😄', 'comedy': '😄',
+                    'أدب': '📚', 'literature': '📚',
+                    'خطوبة': '💍', 'courtship': '💍',
+                    'كلاسيكي': '🏛️', 'classic': '🏛️'
+                }
+
+                icon = icon_mapping.get(cat.lower(), '📚')  # Default to book icon
+                categories_with_icons.append({
+                    "name": cat,
+                    "icon": icon,
+                    "wikilink": "",
+                    "description": self._ensure_word_count(fallback_desc, 60, language)
+                })
+
             return {
-                "categories": [{"name": cat, "icon": "📚", "wikilink": "", "description": self._ensure_word_count(fallback_desc, 60, language)} for cat in categories],
+                "categories": categories_with_icons,
                 "author": {
                     "name": author_name,
-                    "pic": "/static/images/authors/default.jpg",
+                    "image": f"https://ui-avatars.com/api/?name={author_name.replace(' ', '+')}&size=300&background=4f46e5&color=ffffff&format=png&length=10&font-size=0.4",
                     "wikilink": "",
-                    "profession": "كاتب" if language == 'ar' else "writer",
-                    "description": self._ensure_word_count(fallback_author_desc, 60, language)
+                    "profession": ["كاتب"] if language == 'ar' else ["Writer"],
+                    "descriptions": [
+                        self._ensure_word_count(fallback_author_desc, 60, language),
+                        "معلومات إضافية عن المؤلف" if language == 'ar' else "Additional information about the author"
+                    ]
                 },
                 "book_summary": self._ensure_word_count(fallback_summary, 100, language)
             }
@@ -496,7 +563,7 @@ class LLMService:
                         "name": "Category Name",
                         "icon": "Appropriate emoji",
                         "wikilink": "https://en.wikipedia.org/wiki/...",
-                        "description": "Detailed category description exactly 100 English words in length"
+                        "description": "Exactly 100 English words describing this literary category, its characteristics, typical themes, writing styles, and what makes books in this category unique. Focus on the literary genre itself, not general descriptions."
                     }}
                 ],
                 "analysis_summary": "Brief summary of the analysis and why these categories were chosen"
@@ -738,15 +805,18 @@ class LLMService:
             {{
                 "author": {{
                     "name": "{author_name}",
-                    "pic": "real image URL or default path",
+                    "pic": "real image URL - try to find actual author photo URLs from Wikipedia, Goodreads, or other reliable sources",
                     "wikilink": "https://en.wikipedia.org/wiki/...",
                     "profession": "writer/novelist/poet/etc",
                     "description": "50-100 word description of the author"
                 }}
             }}
 
-            IMPORTANT: The description must be exactly 50-100 words.
-            Use real Wikipedia links if available. For pic, use a placeholder path like "/static/images/authors/default.jpg" if no real image URL is known.
+            IMPORTANT:
+            - The description must be exactly 50-100 words.
+            - For pic, try to provide real author image URLs from reliable sources like Wikipedia Commons, Goodreads, or OpenLibrary
+            - Use real Wikipedia links if available
+            - If no real image URL is available, use: "https://ui-avatars.com/api/?name={author_name.replace(' ', '+')}&size=300&background=6366f1&color=ffffff&format=png"
             """
 
         try:
