@@ -130,7 +130,12 @@ def ai_book_search_no_db(request):
     """
     try:
         # Validate input
-        book_name = request.data.get('book_name', '').strip()
+        book_name = request.data.get('book_name', '') or ''
+        if isinstance(book_name, str):
+            book_name = book_name.strip()
+        else:
+            book_name = str(book_name).strip() if book_name else ''
+
         language = request.data.get('language', 'en')
         max_results = request.data.get('max_results', 5)
 
@@ -265,7 +270,7 @@ def website_search(request):
     """
     try:
         # Validate input
-        website_name = request.data.get('website_name', '').strip()
+        website_name = request.data.get('website_name', '').strip() if request.data.get('website_name') else ''
         language = request.data.get('language', 'en')
 
         if not website_name:
@@ -285,8 +290,14 @@ def website_search(request):
         # Get comprehensive website information using LLM
         try:
             website_info = get_website_comprehensive_info(website_name, language)
+            if not website_info or not isinstance(website_info, dict):
+                raise ValueError("Invalid response from LLM")
         except Exception as e:
             print(f"LLM info failed: {e}")
+            website_info = get_fallback_website_info(website_name, language)
+
+        # Ensure website_info is a valid dictionary
+        if not isinstance(website_info, dict):
             website_info = get_fallback_website_info(website_name, language)
 
         # Add website icon
@@ -538,7 +549,12 @@ def company_search(request):
 
         # Get comprehensive company information using LLM
         try:
-            company_info = get_company_comprehensive_info(company_name, language)
+            if language == 'ar':
+                # First get English info, then translate to Arabic for better accuracy
+                company_info_en = get_company_comprehensive_info(company_name, 'en')
+                company_info = translate_company_info_to_arabic(company_info_en, company_name)
+            else:
+                company_info = get_company_comprehensive_info(company_name, language)
         except Exception as e:
             print(f"LLM company info failed: {e}")
             company_info = get_fallback_company_info(company_name, language)
@@ -617,11 +633,13 @@ def get_company_comprehensive_info(company_name: str, language: str = 'en') -> d
 
         ملاحظات مهمة:
         - استخدم معلومات حقيقية ودقيقة عن الشركة
-        - رمز السهم: الرمز الصحيح في البورصة
+        - رمز السهم: الرمز الصحيح في البورصة (مثل TCS.NS للشركات الهندية، AAPL للأمريكية)
+        - إذا كان الإدخال رمز سهم (مثل TCS.NS)، ابحث عن الشركة المقابلة (Tata Consultancy Services)
         - البريد الإلكتروني: للمستثمرين أو الاتصال العام
+        - بلد المنشأ: يجب أن يكون اسم البلد بالعربية (مثل: الهند، الولايات المتحدة الأمريكية، المملكة المتحدة)
         - وصف الفئة: 100 كلمة عربية بالضبط
         - استخدم روابط ويكيبيديا عربية حقيقية
-        - جميع أسماء الحقول والقيم يجب أن تكون باللغة العربية
+        - جميع أسماء الحقول والقيم يجب أن تكون باللغة العربية الفصحى فقط
         """
     else:
         prompt = f"""
@@ -649,11 +667,13 @@ def get_company_comprehensive_info(company_name: str, language: str = 'en') -> d
 
         Important notes:
         - Use real and accurate information about the company
-        - Stock code: correct ticker symbol used in stock exchanges
+        - Stock code: correct ticker symbol used in stock exchanges (e.g., TCS.NS for Indian companies, AAPL for US)
+        - If input is a stock code (e.g., TCS.NS), find the corresponding company (Tata Consultancy Services)
         - Email: investor relations or general contact email
+        - Country origin: must be the full country name in English (e.g., India, United States, United Kingdom)
         - Category description: exactly 100 English words
         - Use real English Wikipedia links for the category
-        - If input is a stock code, provide the full company name
+        - All text must be in English only
         """
 
     try:
@@ -692,6 +712,130 @@ def get_company_comprehensive_info(company_name: str, language: str = 'en') -> d
         print(f"LLM company info error: {e}")
         # Fallback response
         return get_fallback_company_info(company_name, language)
+
+
+def translate_company_info_to_arabic(company_info_en: dict, company_name: str) -> dict:
+    """
+    Translate company information from English to Arabic.
+
+    Args:
+        company_info_en: Company info in English
+        company_name: Original company name
+
+    Returns:
+        Company info translated to Arabic
+    """
+    if not company_info_en:
+        return get_fallback_company_info(company_name, 'ar')
+
+    # Country translations
+    country_translations = {
+        'United States': 'الولايات المتحدة الأمريكية',
+        'India': 'الهند',
+        'United Kingdom': 'المملكة المتحدة',
+        'China': 'الصين',
+        'Japan': 'اليابان',
+        'Germany': 'ألمانيا',
+        'France': 'فرنسا',
+        'Canada': 'كندا',
+        'Australia': 'أستراليا',
+        'South Korea': 'كوريا الجنوبية',
+        'Netherlands': 'هولندا',
+        'Switzerland': 'سويسرا',
+        'Unknown': 'غير محدد'
+    }
+
+    # Industry category translations
+    category_translations = {
+        'Technology': 'التكنولوجيا',
+        'Information Technology': 'تكنولوجيا المعلومات',
+        'Finance': 'الخدمات المالية',
+        'Healthcare': 'الرعاية الصحية',
+        'Entertainment': 'الترفيه',
+        'Retail': 'التجارة',
+        'Energy': 'الطاقة',
+        'Automotive': 'السيارات',
+        'Telecommunications': 'الاتصالات',
+        'Business': 'الأعمال',
+        'Software': 'البرمجيات',
+        'Consulting': 'الاستشارات',
+        'Services': 'الخدمات'
+    }
+
+    # City/Location translations
+    location_translations = {
+        'Mumbai, India': 'مومباي، الهند',
+        'New York, USA': 'نيويورك، الولايات المتحدة',
+        'London, UK': 'لندن، المملكة المتحدة',
+        'Tokyo, Japan': 'طوكيو، اليابان',
+        'Beijing, China': 'بكين، الصين',
+        'Mumbai': 'مومباي',
+        'New York': 'نيويورك',
+        'London': 'لندن',
+        'Tokyo': 'طوكيو',
+        'Beijing': 'بكين',
+        'Unknown': 'غير محدد'
+    }
+
+    # Get original values
+    original_category_name = company_info_en.get('category', {}).get('name', 'Business')
+    original_headquarters = company_info_en.get('headquarters', 'Unknown')
+    original_country = company_info_en.get('country_origin', 'Unknown')
+
+    # Translate headquarters
+    translated_headquarters = location_translations.get(original_headquarters, original_headquarters)
+    # If not found in direct mapping, try to translate parts
+    if translated_headquarters == original_headquarters and ',' in original_headquarters:
+        parts = [part.strip() for part in original_headquarters.split(',')]
+        translated_parts = []
+        for part in parts:
+            if part in location_translations:
+                translated_parts.append(location_translations[part])
+            elif part in country_translations:
+                translated_parts.append(country_translations[part])
+            else:
+                translated_parts.append(part)
+        translated_headquarters = '، '.join(translated_parts)
+
+    # Company name translations
+    company_name_translations = {
+        'Tata Consultancy Services Limited': 'شركة تاتا للخدمات الاستشارية المحدودة',
+        'Tata Consultancy Services': 'شركة تاتا للخدمات الاستشارية',
+        'Apple Inc.': 'شركة آبل المحدودة',
+        'Microsoft Corporation': 'شركة مايكروسوفت',
+        'Google LLC': 'شركة جوجل',
+        'Amazon.com Inc.': 'شركة أمازون',
+        'Meta Platforms Inc.': 'شركة ميتا',
+        'Tesla Inc.': 'شركة تيسلا'
+    }
+
+    original_name = company_info_en.get('name', company_name)
+    translated_name = company_name_translations.get(original_name, original_name)
+
+    # Translate the company info
+    translated_info = {
+        "name": translated_name,
+        "code": company_info_en.get('code', ''),
+        "company_email": company_info_en.get('company_email', ''),
+        "web_url": company_info_en.get('web_url', ''),
+        "logo": company_info_en.get('logo', ''),
+        "country_origin": country_translations.get(original_country, original_country),
+        "category": {
+            "name": category_translations.get(original_category_name, original_category_name),
+            "icon": company_info_en.get('category', {}).get('icon', '🏢'),
+            "wikilink": company_info_en.get('category', {}).get('wikilink', '').replace('en.wikipedia.org', 'ar.wikipedia.org'),
+            "description": ensure_word_count(
+                f"فئة {category_translations.get(original_category_name, original_category_name)} تشمل الشركات والمؤسسات التي تعمل في هذا المجال",
+                100, 'ar'
+            )
+        },
+        "founded": company_info_en.get('founded', 'غير محدد'),
+        "headquarters": translated_headquarters,
+        "ceo": company_info_en.get('ceo', 'غير محدد'),
+        "employees": company_info_en.get('employees', 'غير محدد')
+    }
+
+    return translated_info
 
 
 def get_company_stock_data(stock_code: str) -> dict:
@@ -814,6 +958,9 @@ def get_company_logo_url(web_url_or_name: str) -> str:
         URL to company logo
     """
     try:
+        if not web_url_or_name:
+            return "https://via.placeholder.com/200x200/cccccc/666666?text=Company+Logo"
+
         # Extract domain from URL or use name
         if web_url_or_name.startswith('http'):
             domain = web_url_or_name.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
@@ -937,11 +1084,7 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
             "name": "اسم الفئة بالعربية",
             "icon": "رمز تعبيري مناسب واحد",
             "wikilink": "https://ar.wikipedia.org/wiki/...",
-            "description": "وصف من 150 كلمة عربية بالضبط يشرح ما هي فئة {category_name}، وخصائصها، وميزاتها الرئيسية، وأهميتها. ركز تحديداً على تعريف وشرح هذه الفئة، وليس معلومات عامة.",
-            "subcategories": ["قائمة بالفئات الفرعية الرئيسية ضمن {category_name}"],
-            "related_fields": ["قائمة بالمجالات المرتبطة مباشرة بـ {category_name}"],
-            "industry_size": "نظرة موجزة على حجم صناعة {category_name} وأهميتها الاقتصادية",
-            "notable_companies": ["قائمة بالشركات الرئيسية المتخصصة تحديداً في مجال {category_name}"]
+            "description": "وصف من 150 كلمة عربية بالضبط يشرح ما هي فئة {category_name}، وخصائصها، وميزاتها الرئيسية، وأهميتها. ركز تحديداً على تعريف وشرح هذه الفئة، وليس معلومات عامة."
         }}
 
         المتطلبات الأساسية:
@@ -965,11 +1108,7 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
             "name": "{category_name}",
             "icon": "Single appropriate emoji for this category",
             "wikilink": "https://en.wikipedia.org/wiki/...",
-            "description": "Exactly 150 English words describing what {category_name} is, its characteristics, key features, and significance. Focus specifically on defining and explaining this category, not generic information.",
-            "subcategories": ["List of main subcategories within {category_name}"],
-            "related_fields": ["List of fields directly related to {category_name}"],
-            "industry_size": "Brief overview of the {category_name} industry size and economic importance",
-            "notable_companies": ["List of major companies specifically in the {category_name} field"]
+            "description": "Exactly 150 English words describing what {category_name} is, its characteristics, key features, and significance. Focus specifically on defining and explaining this category, not generic information."
         }}
 
         CRITICAL REQUIREMENTS:
@@ -978,8 +1117,6 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
         - Explain the core characteristics and features of {category_name}
         - Avoid generic business or website descriptions
         - Use real Wikipedia links for {category_name}
-        - List companies that are specifically known for {category_name}
-        - Subcategories should be specific divisions within {category_name}
 
         Example for "Entertainment": Describe movies, TV, music, gaming, theater - not general business concepts.
         Example for "Technology": Describe software, hardware, innovation, digital solutions - not general company info.
@@ -1032,6 +1169,9 @@ def get_fallback_category_info(category_name: str, language: str) -> dict:
     Returns:
         Basic category information structure
     """
+    if not category_name:
+        category_name = "General"
+
     # Map common categories to icons and basic info
     category_lower = category_name.lower()
 
@@ -1081,22 +1221,14 @@ def get_fallback_category_info(category_name: str, language: str) -> dict:
             "name": category_name,
             "icon": mapping['icon'],
             "wikilink": f"https://ar.wikipedia.org/wiki/{category_name}",
-            "description": ensure_word_count(f"فئة {category_name} تشمل مجموعة واسعة من الأنشطة والخدمات المهمة", 150, 'ar'),
-            "subcategories": mapping.get('subcategories_ar', ['قطاعات متنوعة']),
-            "related_fields": ["الأعمال", "التكنولوجيا", "الاقتصاد"],
-            "industry_size": "صناعة كبيرة ومهمة اقتصادياً",
-            "notable_companies": mapping['companies']
+            "description": ensure_word_count(f"فئة {category_name} تشمل مجموعة واسعة من الأنشطة والخدمات المهمة", 150, 'ar')
         }
     else:
         return {
             "name": category_name,
             "icon": mapping['icon'],
             "wikilink": f"https://en.wikipedia.org/wiki/{category_name}",
-            "description": ensure_word_count(f"The {category_name} category encompasses a wide range of important activities and services", 150, 'en'),
-            "subcategories": mapping.get('subcategories_en', ['Various Sectors']),
-            "related_fields": ["Business", "Technology", "Economics"],
-            "industry_size": "Large and economically significant industry",
-            "notable_companies": mapping['companies']
+            "description": ensure_word_count(f"The {category_name} category encompasses a wide range of important activities and services", 150, 'en')
         }
 
 
@@ -1156,7 +1288,11 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
             "اسم": "{author_name}",
             "صورة_المؤلف": "رابط مباشر لصورة حقيقية للمؤلف من ويكيبيديا أو موقع رسمي فقط (يجب أن ينتهي بـ .jpg أو .jpeg أو .png أو .webp)، لا تستخدم روابط صفحات ملفات Wikimedia أو صور أفاتار أو توليدية أو روابط لا تعرض صورة حقيقية. إذا لم تتوفر صورة حقيقية، اتركه فارغاً.",
             "السيرة_الذاتية": "سيرة ذاتية من 200 كلمة عربية بالضبط تتضمن حياته وأعماله وإنجازاته",
-            "المهن": ["كاتب", "روائي", "شاعر"],
+            "المهن": [
+                {{"المهنة": "كاتب"}},
+                {{"المهنة": "روائي"}},
+                {{"المهنة": "شاعر"}}
+            ],
             "رابط_ويكيبيديا": "رابط صفحة ويكيبيديا الحقيقية للمؤلف فقط إذا كان متاحاً (وليس صفحة ملف Wikimedia)، إذا لم يوجد اتركه فارغاً.",
             "رابط_يوتيوب": "رابط يوتيوب الرسمي إذا متوفر، أو نص فارغ",
             "سنة_الميلاد": "سنة الميلاد",
@@ -1168,7 +1304,7 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
         - استخدم معلومات حقيقية ودقيقة عن المؤلف
         - صورة المؤلف: استخدم فقط رابط مباشر لصورة حقيقية من ويكيبيديا أو موقع رسمي (يجب أن ينتهي بـ .jpg أو .jpeg أو .png أو .webp)، لا تستخدم روابط صفحات ملفات Wikimedia أو صور أفاتار أو توليدية أو روابط لا تعرض صورة حقيقية. إذا لم تتوفر صورة حقيقية، اتركه فارغاً.
         - السيرة الذاتية: 200 كلمة عربية بالضبط
-        - المهن: قائمة بالعربية (كاتب، روائي، شاعر، أستاذ، صحفي، إلخ)
+        - المهن: قائمة كائنات بالعربية مثل [{{"المهنة": "كاتب"}}, {{"المهنة": "روائي"}}]
         - الأعمال المشهورة: بالأسماء العربية إذا ترجمت
         - استخدم فقط رابط صفحة ويكيبيديا الحقيقية للمؤلف (وليس صفحة ملف Wikimedia)، إذا لم يوجد رابط صحيح اتركه فارغاً.
         - رابط يوتيوب: إذا كان للمؤلف قناة رسمية
@@ -1182,7 +1318,11 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
             "name": "{author_name}",
             "author_image": "Direct link to a real author image from Wikipedia or official sites ONLY (must end with .jpg, .jpeg, .png, or .webp; NEVER use Wikimedia Commons file pages, avatar, generated, or placeholder images; if no real image is available, leave blank)",
             "bio": "Exactly 200 English words biography including life, works, and achievements",
-            "professions": ["Writer", "Novelist", "Poet"],
+            "professions": [
+                {{"profession": "Writer"}},
+                {{"profession": "Novelist"}},
+                {{"profession": "Poet"}}
+            ],
             "wikilink": "Direct, working Wikipedia author page link ONLY if available (never Wikimedia Commons file pages, never broken links; if not available, leave blank)",
             "youtube_link": "Official YouTube channel URL if available, empty string if not",
             "birth_year": "Birth year",
@@ -1194,7 +1334,7 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
         - Use real and accurate information about the author
         - Author image: ONLY direct link to a real image from Wikipedia or official sites (must end with .jpg, .jpeg, .png, or .webp). NEVER use Wikimedia Commons file pages, avatar, generated, or placeholder images. If no real image is available, leave blank.
         - Biography: exactly 200 English words
-        - Professions: list in English (Writer, Novelist, Poet, Professor, Journalist, etc.)
+        - Professions: list of objects in English like [{{"profession": "Writer"}}, {{"profession": "Novelist"}}]
         - Notable works: use original titles
         - Wikipedia link: ONLY direct, working Wikipedia author page link (never Wikimedia Commons file pages, never broken links; if not available, leave blank)
         - YouTube link: only if the author has an official channel
@@ -1277,8 +1417,22 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
         # Try fixing missing or invalid image using Wikipedia API
         if not response.get(img_key) and response.get(wiki_key):
             wiki_img = get_image_from_wikipedia_page(response[wiki_key])
-            if wiki_img:
+            if wiki_img and is_valid_image_url(wiki_img):
                 response[img_key] = wiki_img
+
+        # Convert professions to object format if they're still in array format
+        if language == 'ar':
+            prof_key = 'المهن'
+        else:
+            prof_key = 'professions'
+
+        if prof_key in response and isinstance(response[prof_key], list):
+            if response[prof_key] and isinstance(response[prof_key][0], str):
+                # Convert from ["Writer", "Poet"] to [{"profession": "Writer"}, {"profession": "Poet"}]
+                if language == 'ar':
+                    response[prof_key] = [{"المهنة": prof} for prof in response[prof_key]]
+                else:
+                    response[prof_key] = [{"profession": prof} for prof in response[prof_key]]
 
         return response
 
@@ -1306,7 +1460,7 @@ def get_fallback_author_info(author_name: str, language: str) -> dict:
             "name": author_name,
             "author_image": "",
             "bio": ensure_word_count(f"{author_name} هو مؤلف معروف له إسهامات مهمة في الأدب", 200, 'ar'),
-            "professions": ["كاتب"],
+            "professions": [{"المهنة": "كاتب"}],
             "wikilink": f"https://ar.wikipedia.org/wiki/{author_name.replace(' ', '_')}",
             "youtube_link": "",
             "birth_year": "غير محدد",
@@ -1318,7 +1472,7 @@ def get_fallback_author_info(author_name: str, language: str) -> dict:
             "name": author_name,
             "author_image": "",
             "bio": ensure_word_count(f"{author_name} is a notable author with significant contributions to literature", 200, 'en'),
-            "professions": ["Writer"],
+            "professions": [{"profession": "Writer"}],
             "wikilink": f"https://en.wikipedia.org/wiki/{author_name.replace(' ', '_')}",
             "youtube_link": "",
             "birth_year": "Unknown",
@@ -1338,87 +1492,98 @@ def get_website_comprehensive_info(website_name: str, language: str = 'en') -> d
     Returns:
         Dict with comprehensive website information
     """
+    if not website_name:
+        return get_fallback_website_info("Unknown", language)
+
     llm_service = LLMService()
 
     if language == 'ar':
         prompt = f"""
-        أنت مساعد بحث. ابحث عن معلومات حقيقية ودقيقة عن: "{website_name}"
+        أنت مساعد بحث متخصص. ابحث عن معلومات حقيقية ودقيقة عن: "{website_name}"
 
-        أرجع JSON بهذا التنسيق المحدد:
+        أرجع JSON بهذا التنسيق المحدد (جميع النصوص باللغة العربية فقط):
         {{
-            "name": "{website_name}",
-            "website_icon": "رابط أيقونة الموقع (تنسيق: https://{website_name.lower()}.com/favicon.ico)",
-            "country": "البلد الذي تأسست فيه (مثل: الولايات المتحدة، الصين، إلخ)",
+            "name": "الاسم الكامل للشركة/الموقع بالعربية",
+            "website_icon": "رابط أيقونة الموقع",
+            "country": "البلد الذي تأسست فيه بالعربية (مثل: الولايات المتحدة الأمريكية، الصين، المملكة المتحدة)",
             "category": {{
-                "name": "فئة الصناعة العامة (مثل: الترفيه، التكنولوجيا، التجارة الإلكترونية، وسائل التواصل الاجتماعي، التعليم، المالية)",
-                "icon": "رمز تعبيري واحد مناسب (🎬 للترفيه، � للتكنولوجيا، 🛒 للتجارة، 📱 لوسائل التواصل، 📚 للتعليم، 💰 للمالية)",
+                "name": "فئة الصناعة بالعربية (مثل: الترفيه، التكنولوجيا، التجارة الإلكترونية، وسائل التواصل الاجتماعي، التعليم، الخدمات المالية)",
+                "icon": "رمز تعبيري واحد مناسب",
                 "wikilink": "رابط ويكيبيديا عربي حقيقي للفئة",
-                "description": "90 كلمة بالضبط تشرح معنى هذه الفئة وما تشمله"
+                "description": "وصف من 90 كلمة عربية بالضبط يشرح معنى هذه الفئة وما تشمله"
             }},
-            "brief_description": "40 كلمة تصف ما يفعله {website_name}",
-            "comprehensive_description": "200 كلمة وصف مفصل لـ {website_name} وتاريخه وخدماته وتأثيره",
+            "brief_description": "وصف موجز من 40 كلمة عربية يوضح ما يفعله {website_name}",
+            "comprehensive_description": "وصف مفصل من 200 كلمة عربية عن {website_name} وتاريخه وخدماته وتأثيره",
             "app_links": {{
-                "playstore": "رابط Google Play Store الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود",
-                "appstore": "رابط Apple App Store الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود"
+                "playstore": "رابط Google Play Store الحقيقي والمؤكد فقط، أو \"\" إذا لم يكن متوفراً",
+                "appstore": "رابط Apple App Store الحقيقي والمؤكد فقط، أو \"\" إذا لم يكن متوفراً"
             }},
             "social_media": {{
-                "youtube": "رابط يوتيوب الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود",
-                "instagram": "رابط إنستغرام الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود",
-                "facebook": "رابط فيسبوك الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود",
-                "twitter": "رابط تويتر/X الحقيقي فقط إذا كان موجود، أو نص فارغ \"\" إذا لم يكن موجود"
+                "youtube": "رابط يوتيوب الرسمي الحقيقي (مثل: https://www.youtube.com/user/netflix أو https://www.youtube.com/@netflix) فقط إذا كان موجوداً، أو \"\" إذا لم يكن متوفراً",
+                "instagram": "رابط إنستغرام الرسمي الحقيقي (مثل: https://www.instagram.com/netflix) فقط إذا كان موجوداً، أو \"\" إذا لم يكن متوفراً",
+                "facebook": "رابط فيسبوك الرسمي الحقيقي (مثل: https://www.facebook.com/Netflix) فقط إذا كان موجوداً، أو \"\" إذا لم يكن متوفراً",
+                "twitter": "رابط تويتر/X الرسمي الحقيقي (مثل: https://twitter.com/Netflix) فقط إذا كان موجوداً، أو \"\" إذا لم يكن متوفراً"
             }},
             "website_url": "رابط الموقع الرسمي",
-            "founded": "سنة التأسيس (مثل: 1997، 1998، إلخ)",
-            "headquarters": "مدينة، ولاية/بلد المقر الرئيسي"
+            "founded": "سنة التأسيس",
+            "headquarters": "مدينة وبلد المقر الرئيسي بالعربية"
         }}
 
         متطلبات أساسية:
-        - استخدم معلومات حقيقية عن {website_name} فقط
-        - لروابط وسائل التواصل والتطبيقات: قدم روابط حقيقية موجودة فقط
-        - إذا لم تكن متأكداً من وجود حساب أو تطبيق، استخدم نص فارغ ""
-        - لا تنشئ روابط وهمية أو مقترحة
-        - من الأفضل إرجاع نص فارغ من رابط خاطئ
-        - اذكر فقط الروابط التي تثق بوجودها فعلاً
+        - جميع النصوص يجب أن تكون باللغة العربية الفصحى فقط
+        - لا تخلط بين العربية والإنجليزية في النص الواحد
+        - استخدم معلومات حقيقية ومؤكدة عن {website_name} فقط
+        - لروابط وسائل التواصل والتطبيقات: قدم روابط حقيقية موجودة ومؤكدة فقط
+        - إذا لم تكن متأكداً 100% من وجود حساب أو تطبيق، استخدم \"\"
+        - لا تنشئ روابط تخمينية أو مقترحة
+        - من الأفضل إرجاع \"\" من رابط خاطئ أو غير مؤكد
         """
     else:
         prompt = f"""
-        You are a research assistant. Find real, accurate information about: "{website_name}"
+        You are a specialized research assistant. Find real, accurate information about: "{website_name}"
 
-        Return JSON with this exact structure:
+        Return JSON with this exact structure (ALL text in English only):
         {{
-            "name": "{website_name}",
-            "website_icon": "Website favicon URL (format: https://{website_name.lower()}.com/favicon.ico)",
-            "country": "Country where founded (e.g., United States, China, etc.)",
+            "name": "Full company/website name in English",
+            "website_icon": "Website favicon URL",
+            "country": "Country where founded in English (e.g., United States, China, United Kingdom)",
             "category": {{
-                "name": "Broad industry category (e.g., Entertainment, Technology, E-commerce, Social Media, Education, Finance)",
-                "icon": "Single appropriate emoji (🎬 for entertainment, � for technology, 🛒 for e-commerce, 📱 for social media, 📚 for education, 💰 for finance)",
-                "wikilink": "Real Wikipedia URL for the category",
-                "description": "Exactly 90 words explaining what this category means and includes"
+                "name": "Industry category in English (e.g., Entertainment, Technology, E-commerce, Social Media, Education, Financial Services)",
+                "icon": "Single appropriate emoji",
+                "wikilink": "Real English Wikipedia URL for the category",
+                "description": "Exactly 90 English words explaining what this category means and includes"
             }},
-            "brief_description": "40 words describing what {website_name} does",
-            "comprehensive_description": "200 words detailed description of {website_name}, its history, services, and impact",
+            "brief_description": "Brief 40 English words describing what {website_name} does",
+            "comprehensive_description": "Detailed 200 English words about {website_name}, its history, services, and impact",
             "app_links": {{
-                "playstore": "Real Google Play Store URL ONLY if it exists, or empty string \"\" if not found",
-                "appstore": "Real Apple App Store URL ONLY if it exists, or empty string \"\" if not found"
+                "playstore": "Real and verified Google Play Store URL ONLY, or \"\" if not available",
+                "appstore": "Real and verified Apple App Store URL ONLY, or \"\" if not available"
             }},
             "social_media": {{
-                "youtube": "Real YouTube channel URL ONLY if it exists, or empty string \"\" if not found",
-                "instagram": "Real Instagram URL ONLY if it exists, or empty string \"\" if not found",
-                "facebook": "Real Facebook URL ONLY if it exists, or empty string \"\" if not found",
-                "twitter": "Real Twitter/X URL ONLY if it exists, or empty string \"\" if not found"
+                "youtube": "Real official YouTube channel URL (e.g., https://www.youtube.com/user/netflix or https://www.youtube.com/@netflix) ONLY if it exists, or \"\" if not available",
+                "instagram": "Real official Instagram URL (e.g., https://www.instagram.com/netflix) ONLY if it exists, or \"\" if not available",
+                "facebook": "Real official Facebook URL (e.g., https://www.facebook.com/Netflix) ONLY if it exists, or \"\" if not available",
+                "twitter": "Real official Twitter/X URL (e.g., https://twitter.com/Netflix) ONLY if it exists, or \"\" if not available"
             }},
             "website_url": "Official website URL",
-            "founded": "Year founded (e.g., 1997, 1998, etc.)",
-            "headquarters": "City, State/Country of headquarters"
+            "founded": "Year founded",
+            "headquarters": "City and country of headquarters in English"
         }}
 
         CRITICAL REQUIREMENTS:
-        - Use REAL information about {website_name} only
-        - For social media and app links: ONLY provide real, existing URLs
-        - If you're not certain a social media account or app exists, use empty string ""
-        - Do NOT create placeholder or guessed URLs
-        - Better to return empty string than wrong URL
-        - Only include links you are confident actually exist
+        - ALL text must be in English only
+        - Do NOT mix English and Arabic in the same text
+        - Use REAL and verified information about {website_name} only
+        - For social media and app links: ONLY provide real, existing, verified URLs
+        - If you're not 100% certain a social media account or app exists, use \"\"
+        - Do NOT create guessed or suggested URLs
+        - Better to return \"\" than wrong or unverified URL
+
+        EXAMPLES for Netflix:
+        - YouTube: "https://www.youtube.com/user/netflix" or "https://www.youtube.com/@netflix"
+        - Instagram: "https://www.instagram.com/netflix"
+        - Facebook: "https://www.facebook.com/Netflix"
+        - Twitter: "https://twitter.com/Netflix"
         """
 
     try:
@@ -1443,10 +1608,18 @@ def get_website_comprehensive_info(website_name: str, language: str = 'en') -> d
             timeout=15
         )
 
-        response = json.loads(chat_completion.choices[0].message.content)
+        response_content = chat_completion.choices[0].message.content
+        if not response_content:
+            raise ValueError("Empty response from LLM")
+
+        response = json.loads(response_content)
+
+        # Validate response structure
+        if not isinstance(response, dict):
+            raise ValueError("Invalid response format from LLM")
 
         # Ensure word counts are correct
-        if 'category' in response and 'description' in response['category']:
+        if 'category' in response and isinstance(response['category'], dict) and 'description' in response['category']:
             response['category']['description'] = ensure_word_count(
                 response['category']['description'], 90, language
             )
@@ -1478,6 +1651,9 @@ def clean_social_media_links(response: dict, website_name: str) -> dict:
     Returns:
         Cleaned response with validated links
     """
+    if not website_name:
+        website_name = "unknown"
+
     # Clean social media links
     if 'social_media' in response:
         social_media = response['social_media']
@@ -1518,6 +1694,9 @@ def is_valid_social_link(link: str, platform: str, website_name: str) -> bool:
     if not link or not link.startswith('http'):
         return False
 
+    if not website_name:
+        return False
+
     # Check if link contains the correct domain
     platform_domains = {
         'youtube': ['youtube.com', 'youtu.be'],
@@ -1527,19 +1706,41 @@ def is_valid_social_link(link: str, platform: str, website_name: str) -> bool:
     }
 
     domains = platform_domains.get(platform, [])
-    if not any(domain in link.lower() for domain in domains):
+    if not link or not any(domain in link.lower() for domain in domains):
         return False
 
-    # Check if it's not a generic/placeholder link
-    generic_patterns = [
-        f'{website_name.lower()}',  # Should contain the actual website name
+    # Check for invalid patterns that indicate placeholder/fake links
+    invalid_patterns = [
         'example.com',
         'placeholder',
-        'template'
+        'template',
+        'yourcompany',
+        'companyname',
+        'website_name',
+        'sample'
     ]
 
-    # The link should contain the website name or be a known official account
-    return any(pattern in link.lower() for pattern in generic_patterns[:1])  # Only check for website name
+    link_lower = link.lower()
+    if any(pattern in link_lower for pattern in invalid_patterns):
+        return False
+
+    # Basic structure validation for each platform
+    if platform == 'youtube':
+        # Accept various YouTube URL patterns - be more permissive
+        # Valid patterns: /channel/, /c/, /user/, /@, or just youtube.com/companyname
+        return (any(pattern in link_lower for pattern in ['/channel/', '/c/', '/user/', '/@']) or
+                ('youtube.com/' in link_lower and len(link_lower.split('/')[-1]) > 2))
+    elif platform == 'instagram':
+        # Should have username after instagram.com/
+        return '/p/' not in link_lower  # Not a post link
+    elif platform == 'facebook':
+        # Should not be a post or photo link
+        return not any(pattern in link_lower for pattern in ['/posts/', '/photos/', '/videos/'])
+    elif platform == 'twitter':
+        # Should be a profile link, not a tweet
+        return '/status/' not in link_lower
+
+    return True
 
 
 def is_valid_app_link(link: str, store: str) -> bool:
@@ -1563,7 +1764,32 @@ def is_valid_app_link(link: str, store: str) -> bool:
     }
 
     domains = store_domains.get(store, [])
-    return any(domain in link.lower() for domain in domains)
+    if not link or not any(domain in link.lower() for domain in domains):
+        return False
+
+    # Check for invalid patterns that indicate placeholder/fake links
+    invalid_patterns = [
+        'example.com',
+        'placeholder',
+        'template',
+        'yourapp',
+        'appname',
+        'sample'
+    ]
+
+    link_lower = link.lower()
+    if any(pattern in link_lower for pattern in invalid_patterns):
+        return False
+
+    # Additional validation for each store
+    if store == 'playstore':
+        # Should have /store/apps/details?id= pattern
+        return '/store/apps/details?id=' in link_lower
+    elif store == 'appstore':
+        # Should have /app/ pattern or /id pattern
+        return '/app/' in link_lower or '/id' in link_lower
+
+    return True
 
 
 def get_website_icon_url(website_name: str) -> str:
@@ -1576,6 +1802,9 @@ def get_website_icon_url(website_name: str) -> str:
     Returns:
         URL to the website's favicon
     """
+    if not website_name:
+        return "https://via.placeholder.com/32x32/cccccc/666666?text=?"
+
     website_lower = website_name.lower()
 
     # Common favicon patterns for popular websites
@@ -1612,6 +1841,9 @@ def get_fallback_website_info(website_name: str, language: str) -> dict:
     Returns:
         Basic website information structure
     """
+    if not website_name:
+        website_name = "Unknown Website"
+
     # Try to guess category based on common website names
     website_lower = website_name.lower()
 
@@ -1770,12 +2002,11 @@ def enhance_single_result(result, llm_service, language):
     # Create clean result with only essential fields and unified category structure
     clean_result = {
         'title': result.get('title', ''),
-        'author': result.get('author', ''),
         'description': result.get('description', ''),
         'pdf_url': result.get('pdf_url', ''),
         'cover_image_url': result.get('cover_image_url', ''),
         'categories': combined_info.get('categories', []),  # Single unified category array
-        'author_info': combined_info.get('author', {}),     # Renamed for clarity
+        'author_info': combined_info.get('author', {}),     # Only author_info, removed duplicate author field
     }
 
     # Only enhance description if it's too short or missing (skip for performance)
@@ -1806,12 +2037,14 @@ def translate_result_to_arabic(result: dict, llm_service) -> dict:
     """
     try:
         # Extract fields to translate
-        title = result.get('title', '')
-        author = result.get('author', '')
-        description = result.get('description', '')
+        title = result.get('title', '') or ''
+        description = result.get('description', '') or ''
+        author_info = result.get('author_info', {})
+        author_name = author_info.get('name', '') or ''
 
         # Skip translation if already in Arabic
-        if any('\u0600' <= char <= '\u06FF' for char in title + author + description):
+        combined_text = str(title) + str(author_name) + str(description)
+        if any('\u0600' <= char <= '\u06FF' for char in combined_text):
             return result
 
         # Simple translation mappings for common terms
@@ -1839,22 +2072,25 @@ def translate_result_to_arabic(result: dict, llm_service) -> dict:
         }
 
         # Apply translations
-        title_lower = title.lower()
-        author_lower = author.lower()
+        title_lower = title.lower() if title else ""
+        author_lower = author_name.lower() if author_name else ""
 
         translated_title = title_translations.get(title_lower, title)
-        translated_author = author_translations.get(author_lower, author)
+        translated_author = author_translations.get(author_lower, author_name)
 
         # For description, use a simple approach
-        if 'pride and prejudice' in description.lower():
+        if description and isinstance(description, str) and 'pride and prejudice' in description.lower():
             translated_description = "رواية كبرياء وتحامل لجين أوستن، وهي من أشهر الروايات الرومانسية في الأدب الإنجليزي. تحكي قصة إليزابيث بينيت والسيد دارسي وعلاقتهما المعقدة التي تتطور من سوء الفهم إلى الحب الحقيقي."
         else:
-            translated_description = f"وصف الكتاب: {description[:100]}..." if description else "وصف غير متوفر"
+            translated_description = f"وصف الكتاب: {description[:100]}..." if description and isinstance(description, str) else "وصف غير متوفر"
 
         # Update result with translations
         result['title'] = translated_title
-        result['author'] = translated_author
         result['description'] = translated_description
+
+        # Update author_info with translated name
+        if 'author_info' in result and isinstance(result['author_info'], dict):
+            result['author_info']['name'] = translated_author
 
         print(f"Translated: {title} -> {translated_title}")
 
@@ -2153,7 +2389,7 @@ def verify_pdf_link(request):
             content_type = response.headers.get('content-type', '')
             content_length = response.headers.get('content-length')
             
-            if is_valid and 'pdf' not in content_type.lower():
+            if is_valid and content_type and 'pdf' not in content_type.lower():
                 is_valid = False
                 error = f"Not a PDF file. Content-Type: {content_type}"
             else:

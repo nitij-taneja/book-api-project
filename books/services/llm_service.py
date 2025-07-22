@@ -75,20 +75,27 @@ class LLMService:
         if language == 'ar':
             prompt = f"""
             استخرج معلومات الكتاب من الاستعلام التالي: '{query}'
-            
+
             أجب بتنسيق JSON فقط، مثل هذا:
             {{
                 "title": "عنوان الكتاب",
                 "author": "اسم المؤلف",
                 "categories": ["الفئة الأولى", "الفئة الثانية"],
                 "language": "ar",
-                "search_variations": ["تنويع البحث 1", "تنويع البحث 2"],
+                "search_variations": ["تنويع البحث 1", "تنويع البحث 2", "تنويع البحث 3"],
                 "description": "وصف مختصر للكتاب",
                 "is_arabic_query": true
             }}
-            
-            إذا لم تكن المعلومات متوفرة، استخدم null. 
-            للفئات، استخدم أسماء عربية مثل: "الأدب", "التاريخ", "العلوم", "الفلسفة", "الدين", "الشعر", "الرواية"
+
+            متطلبات مهمة:
+            - إذا كان الاستعلام يحتوي على كلمات مثل "الاستثمار", "وارن بافيت", "الأسهم" فهذا كتاب عن الاستثمار
+            - إذا كان الاستعلام يحتوي على أسماء مؤلفين مشهورين، استخرج الاسم بدقة
+            - أنشئ 3-4 تنويعات بحث مختلفة لتحسين نتائج البحث
+            - للفئات، استخدم أسماء عربية مثل: "الاستثمار", "المال والأعمال", "التنمية الذاتية", "الأدب", "التاريخ", "العلوم", "الفلسفة", "الدين", "الشعر", "الرواية"
+            - إذا لم تكن المعلومات متوفرة، استخدم null
+
+            أمثلة:
+            - "الاستثمار في الأسهم على طريقة وارن بافيت" → title: "الاستثمار في الأسهم على طريقة وارن بافيت", author: "وارن بافيت", categories: ["الاستثمار", "المال والأعمال"]
             """
         else:
             prompt = f"""
@@ -321,7 +328,7 @@ class LLMService:
                     'literature': 'أدب', 'courtship': 'خطوبة', 'classic': 'كلاسيكي',
                     'fantasy': 'فانتازيا', 'thriller': 'إثارة', 'horror': 'رعب'
                 }
-                arabic_cat = arabic_translations.get(cat.lower(), cat)
+                arabic_cat = arabic_translations.get(cat.lower() if cat else '', cat)
                 arabic_categories.append(arabic_cat)
 
             categories_str_ar = ", ".join(arabic_categories)
@@ -463,7 +470,7 @@ class LLMService:
                         'adventure': 'مغامرة', 'drama': 'دراما', 'comedy': 'كوميديا',
                         'literature': 'أدب', 'courtship': 'خطوبة', 'classic': 'كلاسيكي'
                     }
-                    translated_name = arabic_translations.get(cat.lower(), cat)
+                    translated_name = arabic_translations.get(cat.lower() if cat else '', cat)
                     translated_categories.append(translated_name)
                 else:
                     translated_categories.append(cat)
@@ -490,7 +497,7 @@ class LLMService:
                     'كلاسيكي': '🏛️', 'classic': '🏛️'
                 }
 
-                icon = icon_mapping.get(cat.lower(), '📚')  # Default to book icon
+                icon = icon_mapping.get(cat.lower() if cat else '', '📚')  # Default to book icon
                 categories_with_icons.append({
                     "name": cat,
                     "icon": icon,
@@ -1004,7 +1011,7 @@ class LLMService:
         if not url or not (url.startswith('http://') or url.startswith('https://')):
             return False
 
-        url_lower = url.lower()
+        url_lower = url.lower() if url else ''
 
         # Check if URL ends with .pdf
         if url_lower.endswith('.pdf'):

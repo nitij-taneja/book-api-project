@@ -198,14 +198,14 @@ class ExternalAPIsService:
 
                 # Look for PDF formats in order of preference
                 for format_url, format_type in formats.items():
-                    if any(pdf_type in format_type.lower() for pdf_type in ['pdf', 'application/pdf']):
+                    if format_type and any(pdf_type in format_type.lower() for pdf_type in ['pdf', 'application/pdf']):
                         pdf_url = format_url
                         break
 
                 # If no PDF found, try EPUB (can be converted)
                 if not pdf_url:
                     for format_url, format_type in formats.items():
-                        if 'epub' in format_type.lower():
+                        if format_type and 'epub' in format_type.lower():
                             pdf_url = format_url
                             break
                 
@@ -398,8 +398,10 @@ class ExternalAPIsService:
         
         for result in results:
             # Create a normalized key for comparison
-            title_key = result.get('title', '').lower().strip()
-            author_key = result.get('author', '').lower().strip()
+            title = result.get('title', '') or ''
+            author = result.get('author', '') or ''
+            title_key = title.lower().strip()
+            author_key = author.lower().strip()
             combination_key = f"{title_key}|{author_key}"
             
             if combination_key not in seen_combinations:
@@ -410,20 +412,20 @@ class ExternalAPIsService:
     
     def _rank_results(self, results: List[Dict], extracted_info: Dict) -> List[Dict]:
         """Rank results based on relevance to the original query."""
-        target_title = extracted_info.get('title', '').lower()
-        target_author = extracted_info.get('author', '').lower() if extracted_info.get('author') else ''
+        target_title = (extracted_info.get('title', '') or '').lower()
+        target_author = (extracted_info.get('author', '') or '').lower()
         is_arabic_query = extracted_info.get('is_arabic_query', False)
         
         for result in results:
             score = result.get('relevance_score', 0.5)
             
             # Boost score for title match
-            result_title = result.get('title', '').lower()
+            result_title = (result.get('title', '') or '').lower()
             if target_title in result_title or result_title in target_title:
                 score += 0.3
-            
+
             # Boost score for author match
-            result_author = result.get('author', '').lower()
+            result_author = (result.get('author', '') or '').lower()
             if target_author and (target_author in result_author or result_author in target_author):
                 score += 0.2
             
