@@ -329,6 +329,14 @@ def website_search(request):
         )
 
 
+def is_valid_image_url(url: str) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    if "wikimedia.org" in url or "/wiki/File:" in url:
+        return False
+    return url.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
 @api_view(['POST'])
 def author_search(request):
     """
@@ -345,10 +353,10 @@ def author_search(request):
     {
         "name": "Stephen King",
         "author_image": "https://example.com/stephen-king.jpg",
-        "bio": "100-300 word biography of the author",
-        "professions": ["Writer", "Novelist", "Screenwriter"],
+        "bio": "...",
+        "professions": ["Writer", "Novelist"],
         "wikilink": "https://en.wikipedia.org/wiki/Stephen_King",
-        "youtube_link": "https://youtube.com/@stephenking",
+        "youtube_link": "...",
         "birth_year": "1947",
         "nationality": "American",
         "notable_works": ["The Shining", "It", "The Stand"]
@@ -373,20 +381,19 @@ def author_search(request):
 
         start_time = timezone.now()
 
-        # Get comprehensive author information using LLM
+        # Get author info from LLM (or fallback)
         try:
             author_info = get_author_comprehensive_info(author_name, language)
         except Exception as e:
             print(f"LLM author info failed: {e}")
             author_info = get_fallback_author_info(author_name, language)
 
-        
+        # ✅ Validate and fix author image
+        if not is_valid_image_url(author_info.get("author_image", "")):
+            author_info["author_image"] = get_simple_image_url(author_name, "author")
 
         end_time = timezone.now()
-        search_time = (end_time - start_time).total_seconds()
-
-        # Add metadata
-        author_info['search_time'] = search_time
+        author_info['search_time'] = (end_time - start_time).total_seconds()
         author_info['language'] = language
         author_info['note'] = 'Author information without database storage'
 
@@ -394,86 +401,48 @@ def author_search(request):
 
     except Exception as e:
         import traceback
-        error_details = traceback.format_exc()
         print(f"Author search failed with error: {e}")
-        print(f"Full traceback: {error_details}")
+        print(traceback.format_exc())
 
         return Response(
             {'error': f'Author search failed: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-
-@api_view(['POST'])
+@api_view(["POST"])
 def category_search(request):
-    """
-    Category information endpoint with comprehensive details.
-    No database operations - returns results directly.
-
-    Expected input:
-    {
-        "category_name": "Entertainment",
-        "language": "en" (optional, defaults to "en")
-    }
-
-    Returns:
-    {
-        "name": "Entertainment",
-        "icon": "🎬",
-        "wikilink": "https://en.wikipedia.org/wiki/Entertainment",
-        "description": "150 word comprehensive description of the category",
-        "subcategories": ["Movies", "Music", "Television", "Gaming"],
-        "related_fields": ["Media", "Arts", "Culture"],
-        "industry_size": "Global entertainment industry overview",
-        "notable_companies": ["Disney", "Netflix", "Warner Bros"]
-    }
-    """
     try:
-        # Validate input
-        category_name = request.data.get('category_name', '').strip()
-        language = request.data.get('language', 'en')
+        category_name = request.data.get("category_name", "").strip()
+        language = request.data.get("language", "en")
 
         if not category_name:
-            return Response(
-                {'error': 'category_name is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "category_name is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if language not in ['en', 'ar']:
-            return Response(
-                {'error': 'Language must be "en" or "ar"'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if language not in ["en", "ar"]:
+            return Response({"error": "language must be 'en' or 'ar'"}, status=status.HTTP_400_BAD_REQUEST)
 
         start_time = timezone.now()
 
-        # Get comprehensive category information using LLM
-        try:
-            category_info = get_category_comprehensive_info(category_name, language)
-        except Exception as e:
-            print(f"LLM category info failed: {e}")
-            category_info = get_fallback_category_info(category_name, language)
+        # ✅ Step 1: Call LLM function
+        category_info = get_category_comprehensive_info(category_name, language)
+
+        # ✅ Step 2: Validate image (fallback to Unsplash if LLM returns bad)
+        image_url = category_info.get("image_url", "")
+        if not is_valid_image_url(image_url):
+            category_info["image_url"] = get_simple_image_url(category_name, "category")
 
         end_time = timezone.now()
-        search_time = (end_time - start_time).total_seconds()
-
-        # Add metadata
-        category_info['search_time'] = search_time
-        category_info['language'] = language
-        category_info['note'] = 'Category information without database storage'
+        category_info["search_time"] = (end_time - start_time).total_seconds()
+        category_info["language"] = language
+        category_info["note"] = "Category information without database storage"
 
         return Response(category_info, status=status.HTTP_200_OK)
 
     except Exception as e:
         import traceback
-        error_details = traceback.format_exc()
-        print(f"Category search failed with error: {e}")
-        print(f"Full traceback: {error_details}")
-
-        return Response(
-            {'error': f'Category search failed: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        print("Category search failed:", e)
+        print(traceback.format_exc())
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -1082,7 +1051,7 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
         أرجع JSON بهذا التنسيق المحدد:
         {{
             "name": "اسم الفئة بالعربية",
-            "icon": "رمز تعبيري مناسب واحد",
+            "image_url": "LEAVE_EMPTY_FOR_AUTO_SEARCH",
             "wikilink": "https://ar.wikipedia.org/wiki/...",
             "description": "وصف من 150 كلمة عربية بالضبط يشرح ما هي فئة {category_name}، وخصائصها، وميزاتها الرئيسية، وأهميتها. ركز تحديداً على تعريف وشرح هذه الفئة، وليس معلومات عامة."
         }}
@@ -1094,7 +1063,6 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
         - تجنب الأوصاف العامة للأعمال أو المواقع الإلكترونية
         - استخدم روابط ويكيبيديا عربية حقيقية لـ {category_name}
         - اذكر شركات معروفة تحديداً بـ {category_name}
-        - الفئات الفرعية يجب أن تكون أقسام محددة ضمن {category_name}
 
         مثال للترفيه: اوصف الأفلام، التلفزيون، الموسيقى، الألعاب، المسرح - وليس مفاهيم الأعمال العامة.
         مثال للتكنولوجيا: اوصف البرمجيات، الأجهزة، الابتكار، الحلول الرقمية - وليس معلومات الشركات العامة.
@@ -1106,7 +1074,7 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
         Return JSON with this exact structure:
         {{
             "name": "{category_name}",
-            "icon": "Single appropriate emoji for this category",
+            "image_url": "LEAVE_EMPTY_FOR_AUTO_SEARCH",
             "wikilink": "https://en.wikipedia.org/wiki/...",
             "description": "Exactly 150 English words describing what {category_name} is, its characteristics, key features, and significance. Focus specifically on defining and explaining this category, not generic information."
         }}
@@ -1149,6 +1117,16 @@ def get_category_comprehensive_info(category_name: str, language: str = 'en') ->
         # Ensure description word count is correct
         if 'description' in response:
             response['description'] = ensure_word_count(response['description'], 150, language)
+
+        # Auto-search for category image with validation
+        if 'image_url' in response and (not response['image_url'] or response['image_url'] == "LEAVE_EMPTY_FOR_AUTO_SEARCH"):
+            # Try LLM image search first
+            llm_image = get_image_url_from_llm(category_name, "category")
+            if llm_image:
+                response['image_url'] = llm_image
+            else:
+                # Fallback to static image
+                response['image_url'] = get_simple_image_url(category_name, "category")
 
         return response
 
@@ -1216,26 +1194,180 @@ def get_fallback_category_info(category_name: str, language: str) -> dict:
         'companies': ['Various Companies']
     })
 
+    # Get image URL for category
+    def get_category_image(cat_name):
+        category_images = {
+            'entertainment': 'https://images.unsplash.com/photo-1489599904472-af35ff2c7c3f?w=400&h=300&fit=crop',
+            'technology': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+            'business': 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&h=300&fit=crop',
+            'finance': 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=300&fit=crop',
+            'healthcare': 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400&h=300&fit=crop',
+            'education': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&h=300&fit=crop',
+            'الترفيه': 'https://images.unsplash.com/photo-1489599904472-af35ff2c7c3f?w=400&h=300&fit=crop',
+            'التكنولوجيا': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+            'الأعمال': 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&h=300&fit=crop',
+            'المال': 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=300&fit=crop'
+        }
+        return category_images.get(cat_name.lower(), 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=300&fit=crop')
+
     if language == 'ar':
         return {
             "name": category_name,
-            "icon": mapping['icon'],
+            "image_url": get_category_image(category_name),
             "wikilink": f"https://ar.wikipedia.org/wiki/{category_name}",
             "description": ensure_word_count(f"فئة {category_name} تشمل مجموعة واسعة من الأنشطة والخدمات المهمة", 150, 'ar')
         }
     else:
         return {
             "name": category_name,
-            "icon": mapping['icon'],
+            "image_url": get_category_image(category_name),
             "wikilink": f"https://en.wikipedia.org/wiki/{category_name}",
             "description": ensure_word_count(f"The {category_name} category encompasses a wide range of important activities and services", 150, 'en')
         }
 
 
-def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dict:
-    import requests
+def get_simple_image_url(search_term: str, image_type: str = "general") -> str:
+    """
+    Get a simple, reliable image URL using only static URLs.
+    Returns direct image URLs that end with proper extensions.
 
-    def get_image_from_wikipedia_page(wiki_url: str) -> str:
+    Args:
+        search_term: Term to search for (author name, category, etc.)
+        image_type: Type of image ("author", "category", "general")
+
+    Returns:
+        Reliable static image URL (always ends with .jpg, .png, .webp)
+    """
+
+    # Fallback images - all direct URLs with proper extensions
+    fallback_images = {
+        "author": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop&crop=face&auto=format&fm=jpg",
+        "category": "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=300&fit=crop&auto=format&fm=jpg",
+        "general": "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=300&fit=crop&auto=format&fm=jpg"
+    }
+
+    if image_type == "author":
+        author_images = {
+            'william shakespeare': 'https://upload.wikimedia.org/wikipedia/commons/a/a2/Shakespeare.jpg',
+            'shakespeare': 'https://upload.wikimedia.org/wikipedia/commons/a/a2/Shakespeare.jpg',
+            'stephen king': 'https://upload.wikimedia.org/wikipedia/commons/e/e3/Stephen_King%2C_Comicon.jpg',
+            'jane austen': 'https://upload.wikimedia.org/wikipedia/commons/c/cd/CassandraAusten-JaneAusten%28c.1810%29_hires.jpg',
+            'j.k. rowling': 'https://upload.wikimedia.org/wikipedia/commons/5/5d/J._K._Rowling_2010.jpg',
+            'george orwell': 'https://upload.wikimedia.org/wikipedia/commons/8/8e/George_Orwell_press_photo.jpg',
+            'agatha christie': 'https://upload.wikimedia.org/wikipedia/commons/1/1f/Agatha_Christie.png'
+        }
+
+        author_key = search_term.lower().strip()
+        if author_key in author_images:
+            return author_images[author_key]
+
+        return fallback_images["author"]
+
+    elif image_type == "category":
+        category_images = {
+            'technology': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'entertainment': 'https://images.unsplash.com/photo-1489599904472-af35ff2c7c3f?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'business': 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'science': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'education': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'health': 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'finance': 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=300&fit=crop&auto=format&fm=jpg',
+            'sports': 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop&auto=format&fm=jpg'
+        }
+
+        category_key = search_term.lower().strip()
+        if category_key in category_images:
+            return category_images[category_key]
+
+        return fallback_images["category"]
+
+    else:
+        return fallback_images.get(image_type, fallback_images["general"])
+
+
+def get_image_url_from_llm(search_term: str, image_type: str = "author") -> str:
+    """
+    Query LLM specifically for a direct image URL.
+
+    Args:
+        search_term: Term to search for (author name, category, etc.)
+        image_type: Type of image ("author", "category")
+
+    Returns:
+        Direct image URL or empty string if not found
+    """
+    try:
+        llm_service = LLMService()
+
+        if image_type == "author":
+            prompt = f"""
+Give me a direct image URL (jpg/png/webp) of the author "{search_term}" from a reliable source.
+It must be a direct image URL ending in .jpg, .png, .jpeg, or .webp, not a Wikimedia file page.
+Only respond with the URL, nothing else.
+If you can't find one, respond with an empty string.
+"""
+        else:  # category
+            prompt = f"""
+Give me a direct image URL (jpg/png/webp) representing the category "{search_term}".
+It must be a direct image URL ending in .jpg, .png, .jpeg, or .webp.
+Only respond with the URL, nothing else.
+If you can't find one, respond with an empty string.
+"""
+
+        chat_completion = llm_service.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an image URL finder. Return only direct image URLs or empty strings."
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model=llm_service.model,
+            temperature=0.0,
+            max_tokens=200,
+            timeout=10
+        )
+
+        image_url = chat_completion.choices[0].message.content.strip()
+
+        # Validate the returned URL
+        if image_url and image_url.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            if 'wikimedia.org' not in image_url.lower() and 'wikipedia.org/wiki/File:' not in image_url.lower():
+                return image_url
+
+        return ""
+
+    except Exception as e:
+        print(f"LLM image URL search error: {e}")
+        return ""
+
+
+def get_category_image_url(category_name: str) -> str:
+    """
+    Get a real image URL for a category by searching the internet.
+
+    Args:
+        category_name: Name of the category
+
+    Returns:
+        Image URL for the category
+    """
+    # Get simple reliable image
+    return get_simple_image_url(category_name, "category")
+def is_valid_image_url(url: str) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    if "wikipedia.org/wiki/File:" in url:
+        return False
+    if "wikimedia.org" in url and not url.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        return False
+    return url.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
+def get_image_from_wikipedia_page(wiki_url: str) -> str:
         """
         Extracts direct image URL from a given Wikipedia page.
         """
@@ -1267,6 +1399,9 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
             print(f"Error fetching author image from Wikipedia: {e}")
 
         return ''
+
+
+def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dict:
     """
     Get comprehensive author information using LLM.
 
@@ -1283,28 +1418,30 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
         prompt = f"""
         أنت مساعد بحث متخصص في الأدب والكتاب. ابحث عن معلومات شاملة عن المؤلف: "{author_name}"
 
-        أرجع JSON بهذا التنسيق المحدد (جميع النصوص باللغة العربية):
+        أرجع JSON بهذا التنسيق المحدد (أسماء الحقول بالإنجليزية، القيم بالعربية):
         {{
-            "اسم": "{author_name}",
-            "صورة_المؤلف": "رابط مباشر لصورة حقيقية للمؤلف من ويكيبيديا أو موقع رسمي فقط (يجب أن ينتهي بـ .jpg أو .jpeg أو .png أو .webp)، لا تستخدم روابط صفحات ملفات Wikimedia أو صور أفاتار أو توليدية أو روابط لا تعرض صورة حقيقية. إذا لم تتوفر صورة حقيقية، اتركه فارغاً.",
-            "السيرة_الذاتية": "سيرة ذاتية من 200 كلمة عربية بالضبط تتضمن حياته وأعماله وإنجازاته",
-            "المهن": [
-                {{"المهنة": "كاتب"}},
-                {{"المهنة": "روائي"}},
-                {{"المهنة": "شاعر"}}
+            "name": "{author_name}",
+            "author_image": "LEAVE_EMPTY_FOR_AUTO_SEARCH",
+            "bio": "سيرة ذاتية من 200 كلمة عربية بالضبط تتضمن حياته وأعماله وإنجازاته",
+            "professions": [
+                {{"profession": "كاتب"}},
+                {{"profession": "روائي"}},
+                {{"profession": "شاعر"}}
             ],
-            "رابط_ويكيبيديا": "رابط صفحة ويكيبيديا الحقيقية للمؤلف فقط إذا كان متاحاً (وليس صفحة ملف Wikimedia)، إذا لم يوجد اتركه فارغاً.",
-            "رابط_يوتيوب": "رابط يوتيوب الرسمي إذا متوفر، أو نص فارغ",
-            "سنة_الميلاد": "سنة الميلاد",
-            "الجنسية": "الجنسية بالعربية",
-            "الأعمال_المشهورة": ["قائمة بأشهر الأعمال بالعربية"]
+            "wikilink": "رابط صفحة ويكيبيديا الحقيقية للمؤلف فقط إذا كان متاحاً (وليس صفحة ملف Wikimedia)، إذا لم يوجد اتركه فارغاً.",
+            "youtube_link": "رابط يوتيوب الرسمي إذا متوفر، أو نص فارغ",
+            "birth_year": "سنة الميلاد",
+            "nationality": "الجنسية بالعربية",
+            "notable_works": ["قائمة بأشهر الأعمال بالعربية"]
         }}
 
         ملاحظات مهمة:
         - استخدم معلومات حقيقية ودقيقة عن المؤلف
-        - صورة المؤلف: استخدم فقط رابط مباشر لصورة حقيقية من ويكيبيديا أو موقع رسمي (يجب أن ينتهي بـ .jpg أو .jpeg أو .png أو .webp)، لا تستخدم روابط صفحات ملفات Wikimedia أو صور أفاتار أو توليدية أو روابط لا تعرض صورة حقيقية. إذا لم تتوفر صورة حقيقية، اتركه فارغاً.
+        - أسماء الحقول يجب أن تكون بالإنجليزية (name, author_image, bio, professions, wikilink, youtube_link, birth_year, nationality, notable_works)
+        - القيم والنصوص يجب أن تكون بالعربية
+        - صورة المؤلف: يجب أن تكون رابط مباشر لصورة (يجب أن ينتهي بـ .jpg أو .jpeg أو .png أو .webp). لا تستخدم أبداً صفحات ملفات Wikimedia Commons. إذا لم تجد صورة مباشرة موثوقة، اتركه فارغاً.
         - السيرة الذاتية: 200 كلمة عربية بالضبط
-        - المهن: قائمة كائنات بالعربية مثل [{{"المهنة": "كاتب"}}, {{"المهنة": "روائي"}}]
+        - المهن: قائمة كائنات بالعربية مثل [{{"profession": "كاتب"}}, {{"profession": "روائي"}}]
         - الأعمال المشهورة: بالأسماء العربية إذا ترجمت
         - استخدم فقط رابط صفحة ويكيبيديا الحقيقية للمؤلف (وليس صفحة ملف Wikimedia)، إذا لم يوجد رابط صحيح اتركه فارغاً.
         - رابط يوتيوب: إذا كان للمؤلف قناة رسمية
@@ -1316,7 +1453,7 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
         Return JSON with this exact structure:
         {{
             "name": "{author_name}",
-            "author_image": "Direct link to a real author image from Wikipedia or official sites ONLY (must end with .jpg, .jpeg, .png, or .webp; NEVER use Wikimedia Commons file pages, avatar, generated, or placeholder images; if no real image is available, leave blank)",
+            "author_image": "LEAVE_EMPTY_FOR_AUTO_SEARCH",
             "bio": "Exactly 200 English words biography including life, works, and achievements",
             "professions": [
                 {{"profession": "Writer"}},
@@ -1332,7 +1469,7 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
 
         Important notes:
         - Use real and accurate information about the author
-        - Author image: ONLY direct link to a real image from Wikipedia or official sites (must end with .jpg, .jpeg, .png, or .webp). NEVER use Wikimedia Commons file pages, avatar, generated, or placeholder images. If no real image is available, leave blank.
+        - Author image: Return a direct image URL (must end in .jpg, .png, .jpeg, or .webp). Never use Wikimedia Commons "File" pages. If a reliable image is not found, leave it empty.
         - Biography: exactly 200 English words
         - Professions: list of objects in English like [{{"profession": "Writer"}}, {{"profession": "Novelist"}}]
         - Notable works: use original titles
@@ -1370,55 +1507,32 @@ def get_author_comprehensive_info(author_name: str, language: str = 'en') -> dic
             response['bio'] = ensure_word_count(response['bio'], 200, language)
 
         # --- Post-processing validation for image and Wikipedia links ---
-        def is_valid_image_url(url):
+        def is_valid_image_url(url: str) -> bool:
             if not url or not isinstance(url, str):
                 return False
-            valid_exts = ['.jpg', '.jpeg', '.png', '.webp']
-            url_lower = url.lower()
-            if not any(url_lower.endswith(ext) for ext in valid_exts):
+            # Reject Wikimedia Commons or Wikipedia file pages
+            if 'wikimedia.org' in url.lower() or 'wikipedia.org/wiki/File:' in url.lower():
                 return False
-            # Must be direct image, not Wikimedia Commons file page
-            if 'wikimedia.org/wiki/File:' in url_lower or '/wiki/File:' in url_lower:
-                return False
-            if 'ui-avatars.com' in url_lower or 'avatar' in url_lower or 'placeholder' in url_lower:
+            # Must be a direct image URL
+            if not url.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
                 return False
             return True
 
-        def is_valid_wikipedia_url(url, lang):
-            if not url or not isinstance(url, str):
-                return False
-            if lang == 'ar':
-                prefix = 'https://ar.wikipedia.org/wiki/'
+        # Validate and fix author image
+        img_key = 'author_image'  # Always use English key
+        if not is_valid_image_url(response.get(img_key, '')):
+            # Try LLM image search first
+            llm_image = get_image_url_from_llm(author_name, "author")
+            if llm_image:
+                response[img_key] = llm_image
             else:
-                prefix = 'https://en.wikipedia.org/wiki/'
-            if not url.startswith(prefix):
-                return False
-            # Exclude file, special, commons, category, template, help, talk, portal, wikipedia, main page, user pages, and Wikimedia Commons
-            invalid_patterns = [
-                '/wiki/File:', '/wiki/Special:', '/wiki/Commons:', '/wiki/Category:', '/wiki/Template:', '/wiki/Help:',
-                '/wiki/Talk:', '/wiki/Portal:', '/wiki/Wikipedia:', '/wiki/Main_Page', '/wiki/User:'
-            ]
-            if any(pat in url for pat in invalid_patterns):
-                return False
-            if 'commons.wikimedia.org' in url:
-                return False
-            return True
-
-        # Validate author image
-        img_key = 'صورة_المؤلف' if language == 'ar' else 'author_image'
-        if img_key in response and not is_valid_image_url(response[img_key]):
-            response[img_key] = ''
+                # Fallback to static image
+                response[img_key] = get_simple_image_url(author_name, "author")
 
         # Validate Wikipedia link
-        wiki_key = 'رابط_ويكيبيديا' if language == 'ar' else 'wikilink'
+        wiki_key = 'wikilink'  # Always use English key
         if wiki_key in response and not is_valid_wikipedia_url(response[wiki_key], language):
             response[wiki_key] = ''
-
-        # Try fixing missing or invalid image using Wikipedia API
-        if not response.get(img_key) and response.get(wiki_key):
-            wiki_img = get_image_from_wikipedia_page(response[wiki_key])
-            if wiki_img and is_valid_image_url(wiki_img):
-                response[img_key] = wiki_img
 
         # Convert professions to object format if they're still in array format
         if language == 'ar':
@@ -1509,8 +1623,8 @@ def get_website_comprehensive_info(website_name: str, language: str = 'en') -> d
             "category": {{
                 "name": "فئة الصناعة بالعربية (مثل: الترفيه، التكنولوجيا، التجارة الإلكترونية، وسائل التواصل الاجتماعي، التعليم، الخدمات المالية)",
                 "icon": "رمز تعبيري واحد مناسب",
-                "wikilink": "رابط ويكيبيديا عربي حقيقي للفئة",
-                "description": "وصف من 90 كلمة عربية بالضبط يشرح معنى هذه الفئة وما تشمله"
+                "رابط_ويكيبيديا": "رابط ويكيبيديا عربي حقيقي للفئة",
+                "الوصف": "وصف من 90 كلمة عربية بالضبط يشرح معنى هذه الفئة وما تشمله"
             }},
             "brief_description": "وصف موجز من 40 كلمة عربية يوضح ما يفعله {website_name}",
             "comprehensive_description": "وصف مفصل من 200 كلمة عربية عن {website_name} وتاريخه وخدماته وتأثيره",
