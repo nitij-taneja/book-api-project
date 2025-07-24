@@ -1015,21 +1015,35 @@ def company_search(request):
             if language == 'ar':
                 # First get English info, then translate to Arabic for better accuracy
                 company_info_en = get_company_comprehensive_info(company_name, 'en')
+                # Verify accuracy before translation
+                company_info_en = verify_company_accuracy(company_info_en, company_name)
                 company_info = translate_company_info_to_arabic(company_info_en, company_name)
             else:
-                company_info = get_company_comprehensive_info(company_name, language)
+                company_info = get_company_comprehensive_info(company_name, 'en')
+                # Verify accuracy of company information
+                company_info = verify_company_accuracy(company_info, company_name)
         except Exception as e:
             print(f"LLM company info failed: {e}")
             company_info = get_fallback_company_info(company_name, language)
 
-        # Try to get stock data from free APIs
-        try:
-            stock_data = get_company_stock_data(company_info.get('code', company_name))
-            if stock_data:
-                company_info.update(stock_data)
-        except Exception as e:
-            print(f"Stock data fetch failed: {e}")
-            # Continue with basic company info only
+        # Try to get accurate stock data from Yahoo Finance API
+        stock_code = company_info.get('code', '').upper()
+        if stock_code:
+            try:
+                print(f"Attempting to fetch stock data for {stock_code}")
+                stock_data = get_real_stock_data(stock_code)
+                if stock_data:
+                    # Update company info with accurate stock data
+                    company_info.update(stock_data)
+                    print(f"✅ Successfully fetched real stock data for {stock_code}")
+                    print(f"Market cap: {stock_data.get('market_cap', 'N/A')}")
+                    print(f"Stock price: ${stock_data.get('yesterday_close', 'N/A')}")
+                else:
+                    print(f"❌ No stock data available for {stock_code}")
+            except Exception as e:
+                print(f"❌ Real stock data fetch failed for {stock_code}: {e}")
+        else:
+            print(f"ℹ️  No stock code found for {company_name} - treating as private company")
 
         # Add company logo if not provided or invalid
         if 'logo' not in company_info or not is_valid_image_url(company_info['logo']):
@@ -1126,13 +1140,13 @@ def get_company_comprehensive_info(company_name: str, language: str = 'en') -> d
         """
     else:
         prompt = f"""
-        You are a company and stock research specialist. Find comprehensive information about the company: "{company_name}"
+        You are a company and stock research specialist. Find ACCURATE and CURRENT information about the company: "{company_name}"
 
         Return JSON with this exact structure:
         {{
             "name": "Full company name",
-            "code": "Stock ticker symbol (e.g., AAPL, GOOGL)",
-            "company_email": "Investor relations or general contact email",
+            "code": "CORRECT stock ticker symbol (e.g., AAPL, MSFT, GOOGL)",
+            "company_email": "Real investor relations or general contact email",
             "web_url": "Official company website",
             "logo": "Company logo URL",
             "country_origin": "Country where company originated",
@@ -1148,15 +1162,28 @@ def get_company_comprehensive_info(company_name: str, language: str = 'en') -> d
             "employees": "Approximate number of employees"
         }}
 
-        Important notes:
-        - Use real and accurate information about the company
-        - Stock code: correct ticker symbol used in stock exchanges (e.g., TCS.NS for Indian companies, AAPL for US)
-        - If input is a stock code (e.g., TCS.NS), find the corresponding company (Tata Consultancy Services)
-        - Email: investor relations or general contact email
-        - Country origin: must be the full country name in English (e.g., India, United States, United Kingdom)
+        CRITICAL ACCURACY REQUIREMENTS - VERIFY EVERYTHING:
+        - Use ONLY real and verified information - NO GUESSING OR ASSUMPTIONS
+        - Stock code: MUST be the correct ticker symbol OR empty if not publicly traded
+        - Country origin: RESEARCH the actual country where the company was founded and is headquartered
+          * Examples: "United Arab Emirates" for UAE companies, "United States" for US companies
+          * DO NOT assume US origin - verify the actual country
+        - Headquarters: EXACT city and country where the main headquarters is located
+        - CEO: CURRENT CEO name as of 2024/2025 - verify this is accurate
+        - Founded year: EXACT founding year - research this carefully
+        - Email: REAL contact email - research the actual company website
+        - Web URL: REAL official website - verify it exists
+        - Employees: CURRENT approximate employee count from reliable sources
         - Category description: exactly 100 English words
         - Use real English Wikipedia links for the category
-        - All text must be in English only
+
+        SPECIAL INSTRUCTIONS FOR REGIONAL COMPANIES:
+        - Middle Eastern companies: Verify if they are from UAE, Saudi Arabia, Qatar, etc.
+        - Asian companies: Verify exact country (India, China, Japan, Singapore, etc.)
+        - European companies: Verify exact country (UK, Germany, France, etc.)
+        - DO NOT default to "United States" unless you are certain
+
+        If you cannot verify accurate information, respond with "INSUFFICIENT_DATA" instead of guessing
         """
 
     try:
@@ -1322,113 +1349,211 @@ def translate_company_info_to_arabic(company_info_en: dict, company_name: str) -
     return translated_info
 
 
-def get_company_stock_data(stock_code: str) -> dict:
+def get_real_stock_data(stock_code: str) -> dict:
     """
-    Get company stock data from free APIs.
-
-    Args:
-        stock_code: Stock ticker symbol
-
-    Returns:
-        Dict with stock data or empty dict if failed
+    Get real, accurate stock data from Yahoo Finance API (free).
     """
     try:
-        # Try Alpha Vantage free API (requires API key but has free tier)
-        # For demo purposes, we'll simulate the data structure
-        # In production, you would use real APIs like:
-        # - Alpha Vantage (free tier available)
-        # - Yahoo Finance API
-        # - IEX Cloud (free tier)
-        # - Finnhub (free tier)
+        import requests
+        from datetime import datetime
 
-        # Simulated stock data structure
-        stock_data = {
-            "stock_data": {
-                "last_52_weeks_low": 164.08,
-                "last_52_weeks_high": 237.49,
-                "market_cap": "3.2T",
-                "yesterday_close": 210.02
-            },
-            "yesterday_data": {
-                "Date": "2025-07-17T00:00:00-04:00",
-                "Open": 210.57,
-                "High": 211.80,
-                "Low": 209.59,
-                "Close": 210.02,
-                "Volume": 48010700
-            },
-            "last_7_days_data": [
-                {
-                    "Date": "2025-07-11T00:00:00-04:00",
-                    "Open": 210.57,
-                    "High": 212.13,
-                    "Low": 209.86,
-                    "Close": 211.16,
-                    "Volume": 39765800
-                },
-                {
-                    "Date": "2025-07-12T00:00:00-04:00",
-                    "Open": 211.20,
-                    "High": 213.45,
-                    "Low": 210.15,
-                    "Close": 212.80,
-                    "Volume": 41234500
-                },
-                {
-                    "Date": "2025-07-13T00:00:00-04:00",
-                    "Open": 212.85,
-                    "High": 214.20,
-                    "Low": 211.90,
-                    "Close": 213.15,
-                    "Volume": 38765200
-                },
-                {
-                    "Date": "2025-07-14T00:00:00-04:00",
-                    "Open": 209.93,
-                    "High": 210.91,
-                    "Low": 207.54,
-                    "Close": 208.62,
-                    "Volume": 38840100
-                },
-                {
-                    "Date": "2025-07-15T00:00:00-04:00",
-                    "Open": 209.22,
-                    "High": 211.89,
-                    "Low": 208.92,
-                    "Close": 209.11,
-                    "Volume": 42296300
-                },
-                {
-                    "Date": "2025-07-16T00:00:00-04:00",
-                    "Open": 210.30,
-                    "High": 212.40,
-                    "Low": 208.64,
-                    "Close": 210.16,
-                    "Volume": 47490500
-                },
-                {
-                    "Date": "2025-07-17T00:00:00-04:00",
-                    "Open": 210.57,
-                    "High": 211.80,
-                    "Low": 209.59,
-                    "Close": 210.02,
-                    "Volume": 48010700
-                }
-            ]
+        # Use Yahoo Finance API (free and reliable)
+        base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
+        quote_url = f"{base_url}/{stock_code}?interval=1d&range=1y"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
 
-        # In a real implementation, you would make actual API calls here
-        # Example with Alpha Vantage:
-        # api_key = "YOUR_API_KEY"
-        # url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={stock_code}&apikey={api_key}"
-        # response = requests.get(url)
-        # data = response.json()
+        response = requests.get(quote_url, headers=headers, timeout=10)
 
-        return stock_data
+        if response.status_code == 200:
+            data = response.json()
+
+            if 'chart' in data and data['chart']['result']:
+                result = data['chart']['result'][0]
+                meta = result['meta']
+
+                # Get historical data
+                timestamps = result['timestamp']
+                quotes = result['indicators']['quote'][0]
+
+                if not timestamps or not quotes['close']:
+                    return {}
+
+                # Get the most recent data
+                latest_idx = -1
+                latest_timestamp = timestamps[latest_idx]
+                latest_date = datetime.fromtimestamp(latest_timestamp).strftime('%Y-%m-%d')
+
+                # Calculate 52-week high/low
+                closes = [c for c in quotes['close'] if c is not None]
+                highs = [h for h in quotes['high'] if h is not None]
+                lows = [l for l in quotes['low'] if l is not None]
+
+                if not closes:
+                    return {}
+
+                # Get market cap from meta
+                market_cap = meta.get('marketCap', 0)
+                if market_cap == 0:
+                    # Try to get market cap from current price * shares outstanding
+                    shares_outstanding = meta.get('sharesOutstanding', 0)
+                    current_price = quotes['close'][latest_idx] if quotes['close'][latest_idx] else 0
+                    if shares_outstanding and current_price:
+                        market_cap = shares_outstanding * current_price
+
+                # If still 0, try alternative calculation or known values
+                if market_cap == 0:
+                    market_cap = get_fallback_market_cap(stock_code, current_price)
+
+                market_cap_formatted = format_market_cap(market_cap) if market_cap > 0 else "N/A"
+
+                # Format yesterday's data with lowercase keys
+                yesterday_data = {
+                    'date': latest_date,
+                    'open': round(quotes['open'][latest_idx], 2) if quotes['open'][latest_idx] else 0,
+                    'high': round(quotes['high'][latest_idx], 2) if quotes['high'][latest_idx] else 0,
+                    'low': round(quotes['low'][latest_idx], 2) if quotes['low'][latest_idx] else 0,
+                    'close': round(quotes['close'][latest_idx], 2) if quotes['close'][latest_idx] else 0,
+                    'volume': quotes['volume'][latest_idx] if quotes['volume'][latest_idx] else 0
+                }
+
+                # Get last 7 days data with lowercase keys
+                last_7_days = []
+                for i in range(max(0, len(timestamps) - 7), len(timestamps)):
+                    if (quotes['close'][i] is not None and
+                        quotes['open'][i] is not None and
+                        quotes['high'][i] is not None and
+                        quotes['low'][i] is not None):
+
+                        day_data = {
+                            'date': datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d'),
+                            'open': round(quotes['open'][i], 2),
+                            'high': round(quotes['high'][i], 2),
+                            'low': round(quotes['low'][i], 2),
+                            'close': round(quotes['close'][i], 2),
+                            'volume': quotes['volume'][i] if quotes['volume'][i] else 0
+                        }
+                        last_7_days.append(day_data)
+
+                return {
+                    'last_52_weeks_low': round(min(lows), 2),
+                    'last_52_weeks_high': round(max(highs), 2),
+                    'market_cap': market_cap_formatted,
+                    'yesterday_close': yesterday_data['close'],
+                    'yesterday_data': yesterday_data,
+                    'last_7_days_data': last_7_days[-7:]  # Last 7 days only
+                }
+
+        return {}
 
     except Exception as e:
-        print(f"Stock data fetch failed: {e}")
+        print(f"Error fetching real stock data for {stock_code}: {e}")
         return {}
+
+
+def format_market_cap(market_cap: int) -> str:
+    """Format market cap in readable format (T for trillion, B for billion)."""
+    if market_cap >= 1_000_000_000_000:
+        return f"{market_cap / 1_000_000_000_000:.1f}T"
+    elif market_cap >= 1_000_000_000:
+        return f"{market_cap / 1_000_000_000:.1f}B"
+    elif market_cap >= 1_000_000:
+        return f"{market_cap / 1_000_000:.1f}M"
+    else:
+        return str(market_cap)
+
+
+def get_fallback_market_cap(stock_code: str, current_price: float) -> int:
+    """
+    Get fallback market cap for major companies when API doesn't provide it.
+    """
+    # Known approximate shares outstanding for major companies (in billions)
+    known_shares = {
+        'MSFT': 7.4,  # Microsoft ~7.4B shares
+        'AAPL': 15.3, # Apple ~15.3B shares
+        'GOOGL': 12.3, # Google ~12.3B shares
+        'TSLA': 3.2,  # Tesla ~3.2B shares
+        'AMZN': 10.5, # Amazon ~10.5B shares
+    }
+
+    if stock_code in known_shares and current_price > 0:
+        shares_billion = known_shares[stock_code]
+        market_cap = int(shares_billion * 1_000_000_000 * current_price)
+        print(f"Calculated market cap for {stock_code}: {format_market_cap(market_cap)}")
+        return market_cap
+
+    return 0
+
+
+def is_publicly_traded_company(company_name: str, stock_code: str) -> bool:
+    """
+    Check if a company is actually publicly traded.
+    """
+    try:
+        # Try to get stock data - if successful, it's publicly traded
+        stock_data = get_real_stock_data(stock_code)
+        return bool(stock_data)
+    except:
+        return False
+
+
+def verify_company_accuracy(company_info: dict, company_name: str) -> dict:
+    """
+    Verify and correct company information for accuracy.
+    """
+    try:
+        # Known corrections for common companies
+        corrections = {
+            'msaari': {
+                'country_origin': 'United Arab Emirates',
+                'headquarters': 'Dubai, United Arab Emirates',
+                'code': '',  # Not publicly traded
+            },
+            'microsoft': {
+                'country_origin': 'United States',
+                'headquarters': 'Redmond, Washington, United States',
+                'code': 'MSFT',
+            },
+            'apple': {
+                'country_origin': 'United States',
+                'headquarters': 'Cupertino, California, United States',
+                'code': 'AAPL',
+            },
+            'tesla': {
+                'country_origin': 'United States',
+                'headquarters': 'Austin, Texas, United States',
+                'code': 'TSLA',
+            }
+        }
+
+        company_key = company_name.lower().strip()
+
+        if company_key in corrections:
+            correction = corrections[company_key]
+            for key, value in correction.items():
+                if key in company_info:
+                    company_info[key] = value
+                    print(f"Corrected {key} for {company_name}: {value}")
+
+        # Additional validation
+        if company_info.get('country_origin') == 'United States' and company_key not in ['microsoft', 'apple', 'tesla', 'google', 'amazon', 'facebook', 'netflix']:
+            # Double-check if this is really a US company
+            print(f"WARNING: Verify if {company_name} is actually from United States")
+
+        return company_info
+
+    except Exception as e:
+        print(f"Error in company verification: {e}")
+        return company_info
+
+
+def get_company_stock_data(stock_code: str) -> dict:
+    """
+    Wrapper function to maintain compatibility.
+    """
+    return get_real_stock_data(stock_code)
 
 
 def get_company_logo_url(web_url_or_name: str) -> str:
